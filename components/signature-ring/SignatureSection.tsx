@@ -21,7 +21,7 @@ export default function SignatureSection({ heroIntroReady = false }: SignatureSe
   const orbitRef = useRef<HTMLDivElement>(null)
 
   const [scrollProgress, setScrollProgress] = useState(0)
-  const [selectedMaterial, setSelectedMaterial] = useState<RingMaterialType>('platinum')
+  const [selectedMaterial, setSelectedMaterial] = useState<RingMaterialType>('champagne-gold')
   const [isDragging, setIsDragging] = useState(false)
 
   useEffect(() => {
@@ -71,12 +71,13 @@ export default function SignatureSection({ heroIntroReady = false }: SignatureSe
       })
 
       // Master continuous 0.00 -> 1.00 scroll timeline
+      // Scrub 0.9 eliminates delayed rubber-band catch-up surges while Three.js provides velvety mass damping
       const tl = gsap.timeline({
         scrollTrigger: {
           trigger: sectionRef.current,
           start: 'top top',
           end: () => (window.innerWidth < 768 ? '+=6000' : '+=9500'),
-          scrub: 1.4,
+          scrub: 0.9,
           pin: true,
           anticipatePin: 1,
           invalidateOnRefresh: true,
@@ -105,98 +106,100 @@ export default function SignatureSection({ heroIntroReady = false }: SignatureSe
 
       /* =======================================================================
          0.00 -> 0.05 : BLACK VOID
-         0.05 -> 0.18 : RING HERO
+         0.05 -> 0.20 : RING HERO
          ======================================================================= */
       // Hero headline gently dissolves out
-      exitStage('.stage-ui-hero', 0.05, 0.07)
+      exitStage('.stage-ui-hero', 0.06, 0.08)
 
       /* =======================================================================
-         0.18 -> 0.32 : ANATOMY (Sequential Callouts: 1 at a time)
+         0.20 -> 0.34 : ANATOMY (Sequential Callouts: 1 at a time)
          ======================================================================= */
-      enterStage('.stage-ui-anatomy', 0.18, 0.045)
+      enterStage('.stage-ui-anatomy', 0.20, 0.045)
       // Reveal SVG container only during anatomy
-      tl.to(['.cinema-svg-callouts', '.callout-labels-container'], { autoAlpha: 1, duration: 0.02 }, 0.18)
+      tl.to(['.cinema-svg-callouts', '.callout-labels-container'], { autoAlpha: 1, duration: 0.02 }, 0.20)
 
-      // Callout 1: Solitaire (0.18 -> 0.22)
-      if (callout1Line) tl.to(callout1Line, { strokeDashoffset: 0, duration: 0.03, ease: 'power2.out' }, 0.18)
-      if (callout1Dot) tl.to(callout1Dot, { scale: 1, autoAlpha: 1, duration: 0.02, ease: 'back.out(2)' }, 0.18)
-      if (callout1Text) tl.to(callout1Text, { autoAlpha: 1, y: 0, duration: 0.03, ease: 'power2.out' }, 0.19)
-      if (callout1Text) tl.to(callout1Text, { autoAlpha: 0, y: -8, duration: 0.02, ease: 'power2.in' }, 0.22)
-      if (callout1Line) tl.to(callout1Line, { strokeDashoffset: callout1Line.getTotalLength?.() || 350, duration: 0.02, ease: 'power2.in' }, 0.22)
-      if (callout1Dot) tl.to(callout1Dot, { scale: 0, autoAlpha: 0, duration: 0.02 }, 0.22)
+      // Callout 1: Solitaire (0.20 -> 0.235)
+      if (callout1Line) tl.to(callout1Line, { strokeDashoffset: 0, duration: 0.025, ease: 'power2.out' }, 0.20)
+      if (callout1Dot) tl.to(callout1Dot, { scale: 1, autoAlpha: 1, duration: 0.02, ease: 'back.out(2)' }, 0.20)
+      if (callout1Text) tl.to(callout1Text, { autoAlpha: 1, y: 0, duration: 0.025, ease: 'power2.out' }, 0.205)
+      if (callout1Text) tl.to(callout1Text, { autoAlpha: 0, y: -8, duration: 0.018, ease: 'power2.in' }, 0.235)
+      if (callout1Line) tl.to(callout1Line, { strokeDashoffset: callout1Line.getTotalLength?.() || 350, duration: 0.018, ease: 'power2.in' }, 0.235)
+      if (callout1Dot) tl.to(callout1Dot, { scale: 0, autoAlpha: 0, duration: 0.018 }, 0.235)
 
-      // Callout 2: Pavé (0.22 -> 0.25)
-      if (callout2Line) tl.to(callout2Line, { strokeDashoffset: 0, duration: 0.025, ease: 'power2.out' }, 0.22)
-      if (callout2Dot) tl.to(callout2Dot, { scale: 1, autoAlpha: 1, duration: 0.02, ease: 'back.out(2)' }, 0.22)
-      if (callout2Text) tl.to(callout2Text, { autoAlpha: 1, y: 0, duration: 0.025, ease: 'power2.out' }, 0.225)
-      if (callout2Text) tl.to(callout2Text, { autoAlpha: 0, y: -8, duration: 0.02, ease: 'power2.in' }, 0.25)
-      if (callout2Line) tl.to(callout2Line, { strokeDashoffset: callout2Line.getTotalLength?.() || 350, duration: 0.02, ease: 'power2.in' }, 0.25)
-      if (callout2Dot) tl.to(callout2Dot, { scale: 0, autoAlpha: 0, duration: 0.02 }, 0.25)
+      // Callout 2: Pavé (0.235 -> 0.270)
+      if (callout2Line) tl.to(callout2Line, { strokeDashoffset: 0, duration: 0.025, ease: 'power2.out' }, 0.235)
+      if (callout2Dot) tl.to(callout2Dot, { scale: 1, autoAlpha: 1, duration: 0.02, ease: 'back.out(2)' }, 0.235)
+      if (callout2Text) tl.to(callout2Text, { autoAlpha: 1, y: 0, duration: 0.025, ease: 'power2.out' }, 0.240)
+      if (callout2Text) tl.to(callout2Text, { autoAlpha: 0, y: -8, duration: 0.018, ease: 'power2.in' }, 0.270)
+      if (callout2Line) tl.to(callout2Line, { strokeDashoffset: callout2Line.getTotalLength?.() || 350, duration: 0.018, ease: 'power2.in' }, 0.270)
+      if (callout2Dot) tl.to(callout2Dot, { scale: 0, autoAlpha: 0, duration: 0.018 }, 0.270)
 
-      // Callout 3: 18K Gold (0.25 -> 0.28)
-      if (callout3Line) tl.to(callout3Line, { strokeDashoffset: 0, duration: 0.025, ease: 'power2.out' }, 0.25)
-      if (callout3Dot) tl.to(callout3Dot, { scale: 1, autoAlpha: 1, duration: 0.02, ease: 'back.out(2)' }, 0.25)
-      if (callout3Text) tl.to(callout3Text, { autoAlpha: 1, y: 0, duration: 0.025, ease: 'power2.out' }, 0.255)
-      if (callout3Text) tl.to(callout3Text, { autoAlpha: 0, y: -8, duration: 0.02, ease: 'power2.in' }, 0.28)
-      if (callout3Line) tl.to(callout3Line, { strokeDashoffset: callout3Line.getTotalLength?.() || 350, duration: 0.02, ease: 'power2.in' }, 0.28)
-      if (callout3Dot) tl.to(callout3Dot, { scale: 0, autoAlpha: 0, duration: 0.02 }, 0.28)
+      // Callout 3: 18K Gold (0.270 -> 0.305)
+      if (callout3Line) tl.to(callout3Line, { strokeDashoffset: 0, duration: 0.025, ease: 'power2.out' }, 0.270)
+      if (callout3Dot) tl.to(callout3Dot, { scale: 1, autoAlpha: 1, duration: 0.02, ease: 'back.out(2)' }, 0.270)
+      if (callout3Text) tl.to(callout3Text, { autoAlpha: 1, y: 0, duration: 0.025, ease: 'power2.out' }, 0.275)
+      if (callout3Text) tl.to(callout3Text, { autoAlpha: 0, y: -8, duration: 0.018, ease: 'power2.in' }, 0.305)
+      if (callout3Line) tl.to(callout3Line, { strokeDashoffset: callout3Line.getTotalLength?.() || 350, duration: 0.018, ease: 'power2.in' }, 0.305)
+      if (callout3Dot) tl.to(callout3Dot, { scale: 0, autoAlpha: 0, duration: 0.018 }, 0.305)
 
-      // Callout 4: Prongs / Cathedral (0.28 -> 0.32)
-      if (callout4Line) tl.to(callout4Line, { strokeDashoffset: 0, duration: 0.03, ease: 'power2.out' }, 0.28)
-      if (callout4Dot) tl.to(callout4Dot, { scale: 1, autoAlpha: 1, duration: 0.02, ease: 'back.out(2)' }, 0.28)
-      if (callout4Text) tl.to(callout4Text, { autoAlpha: 1, y: 0, duration: 0.03, ease: 'power2.out' }, 0.285)
-      if (callout4Text) tl.to(callout4Text, { autoAlpha: 0, y: -8, duration: 0.02, ease: 'power2.in' }, 0.315)
-      if (callout4Line) tl.to(callout4Line, { strokeDashoffset: callout4Line.getTotalLength?.() || 350, duration: 0.02, ease: 'power2.in' }, 0.315)
-      if (callout4Dot) tl.to(callout4Dot, { scale: 0, autoAlpha: 0, duration: 0.02 }, 0.315)
+      // Callout 4: Prongs / Cathedral (0.305 -> 0.340)
+      if (callout4Line) tl.to(callout4Line, { strokeDashoffset: 0, duration: 0.025, ease: 'power2.out' }, 0.305)
+      if (callout4Dot) tl.to(callout4Dot, { scale: 1, autoAlpha: 1, duration: 0.02, ease: 'back.out(2)' }, 0.305)
+      if (callout4Text) tl.to(callout4Text, { autoAlpha: 1, y: 0, duration: 0.025, ease: 'power2.out' }, 0.310)
+      if (callout4Text) tl.to(callout4Text, { autoAlpha: 0, y: -8, duration: 0.018, ease: 'power2.in' }, 0.338)
+      if (callout4Line) tl.to(callout4Line, { strokeDashoffset: callout4Line.getTotalLength?.() || 350, duration: 0.018, ease: 'power2.in' }, 0.338)
+      if (callout4Dot) tl.to(callout4Dot, { scale: 0, autoAlpha: 0, duration: 0.018 }, 0.338)
 
       // Ensure SVG container is 100% hidden at end of anatomy
-      tl.to(['.cinema-svg-callouts', '.callout-labels-container'], { autoAlpha: 0, duration: 0.02 }, 0.315)
-      exitStage('.stage-ui-anatomy', 0.31, 0.03)
+      tl.to(['.cinema-svg-callouts', '.callout-labels-container'], { autoAlpha: 0, duration: 0.018 }, 0.338)
+      exitStage('.stage-ui-anatomy', 0.33, 0.03)
 
       /* =======================================================================
-         0.38 -> 0.48 : SILHOUETTE EMERGES
+         0.34 -> 0.46 : SILHOUETTE EMERGES (Smooth 12% scroll window)
          ======================================================================= */
-      enterStage('.stage-ui-silhouette', 0.38, 0.04)
-      exitStage('.stage-ui-silhouette', 0.445, 0.025)
+      enterStage('.stage-ui-silhouette', 0.36, 0.04)
+      exitStage('.stage-ui-silhouette', 0.43, 0.025)
 
       /* =======================================================================
-         0.48 -> 0.58 : THE TOUCH / LIVING HAND
+         0.46 -> 0.56 : THE TOUCH / LIVING HAND
          ======================================================================= */
-      enterStage('.stage-ui-hand', 0.485, 0.04)
-      exitStage('.stage-ui-hand', 0.555, 0.025)
-
-      // 0.59 -> 0.67: THE APPROACH
-      enterStage('.stage-ui-approach', 0.59, 0.04)
-      exitStage('.stage-ui-approach', 0.655, 0.025)
+      enterStage('.stage-ui-hand', 0.47, 0.04)
+      exitStage('.stage-ui-hand', 0.535, 0.025)
 
       /* =======================================================================
-         0.69 -> 0.76: THE SACRED SLIDE — MOST IMPORTANT MOMENT
+         0.56 -> 0.64 : THE APPROACH (Smooth 8% scroll window)
          ======================================================================= */
-      enterStage('.stage-ui-embrace', 0.69, 0.04)
-      exitStage('.stage-ui-embrace', 0.738, 0.022)
+      enterStage('.stage-ui-approach', 0.57, 0.04)
+      exitStage('.stage-ui-approach', 0.635, 0.025)
 
       /* =======================================================================
-         0.77 -> 0.82: 360° LIVING SHOWCASE (Hand Turns 360°, Ring Anchored)
+         0.68 -> 0.77 : THE SACRED SLIDE — CONTINUOUS LUXURY EMBRACE 💍
          ======================================================================= */
-      enterStage('.stage-ui-orbit', 0.77, 0.03)
-      exitStage('.stage-ui-orbit', 0.812, 0.012)
+      enterStage('.stage-ui-embrace', 0.685, 0.04)
+      exitStage('.stage-ui-embrace', 0.745, 0.025)
 
       /* =======================================================================
-         0.828 -> 0.88: THE SACRED UNTHREADING (Hand se nikalna)
+         0.77 -> 0.83 : 360° LIVING SHOWCASE (Hand & Ring in Dorsal Alignment)
          ======================================================================= */
-      enterStage('.stage-ui-proximity', 0.828, 0.03)
-      exitStage('.stage-ui-proximity', 0.87, 0.014)
+      enterStage('.stage-ui-orbit', 0.775, 0.03)
+      exitStage('.stage-ui-orbit', 0.815, 0.015)
 
       /* =======================================================================
-         0.888 -> 0.95: THE CELESTIAL TRAVELING FLIGHT (Travel karti karti)
+         0.83 -> 0.90 : THE SACRED UNTHREADING (Smooth, fluid slide off the finger)
          ======================================================================= */
-      enterStage('.stage-ui-macro', 0.888, 0.03)
-      exitStage('.stage-ui-macro', 0.94, 0.014)
+      enterStage('.stage-ui-proximity', 0.835, 0.03)
+      exitStage('.stage-ui-proximity', 0.885, 0.015)
 
       /* =======================================================================
-         0.958 -> 1.000: THE THRESHOLD / DESCENT INTO CAROUSEL
+         0.90 -> 0.96 : THE CELESTIAL TRAVELING FLIGHT (Dynamic zero-g flight)
          ======================================================================= */
-      enterStage('.stage-ui-masterpiece', 0.958, 0.025)
+      enterStage('.stage-ui-macro', 0.905, 0.03)
+      exitStage('.stage-ui-macro', 0.948, 0.012)
+
+      /* =======================================================================
+         0.960 -> 1.000 : THE THRESHOLD / TRANSIT INTO MATERIAL STUDY
+         ======================================================================= */
+      enterStage('.stage-ui-masterpiece', 0.960, 0.025)
       exitStage('.stage-ui-masterpiece', 0.996, 0.003)
       if (canvasWrapRef.current) {
         tl.to(canvasWrapRef.current, { autoAlpha: 0, duration: 0.002, ease: 'power1.in' }, 0.999)
@@ -269,7 +272,7 @@ export default function SignatureSection({ heroIntroReady = false }: SignatureSe
         </div>
         <div className="callout-label label-gold">
           <span className="callout-num">03</span>
-          <span className="callout-title">18K WHITE GOLD</span>
+          <span className="callout-title">18K CHAMPAGNE GOLD</span>
           <span className="callout-spec">Sculpted Milgrain Equator</span>
         </div>
         <div className="callout-label label-prongs">
@@ -291,7 +294,7 @@ export default function SignatureSection({ heroIntroReady = false }: SignatureSe
               The Doji<br />
               <em>Solitaire</em>
             </h1>
-            <p className="stage-subtext">Sculpted in 18K White Gold · 1.5ct Brilliant Diamond</p>
+            <p className="stage-subtext">Sculpted in 18K Champagne Gold · 1.5ct Brilliant Diamond</p>
           </div>
           <div className="stage-right-block right-aligned">
             <div className="stage-step-num">00</div>
@@ -384,6 +387,16 @@ export default function SignatureSection({ heroIntroReady = false }: SignatureSe
             </h2>
             <p className="stage-subtext">The hand orbits 360° in living light while the diamond remains anchored in timeless poise.</p>
           </div>
+          <div className="stage-right-block right-aligned">
+            <p className="stage-right-eyebrow">
+              360° Living<br />Showcase
+            </p>
+            <span className="stage-right-rule" />
+            <div className="stage-inspection-hint" aria-hidden="true">
+              <span className="hint-sparkle">✦</span>
+              <span>Drag to rotate 360° · Scroll to release</span>
+            </div>
+          </div>
         </div>
 
         {/* 0.82 - 0.88: THE SACRED RELEASE */}
@@ -419,6 +432,10 @@ export default function SignatureSection({ heroIntroReady = false }: SignatureSe
               Spatial Flight<br />57 Facets
             </p>
             <span className="stage-right-rule" />
+            <div className="stage-inspection-hint" aria-hidden="true" style={{ marginTop: '0.75rem' }}>
+              <span className="hint-sparkle">✦</span>
+              <span>360° Living Orbit · Drag to rotate</span>
+            </div>
           </div>
         </div>
 
@@ -458,7 +475,7 @@ export default function SignatureSection({ heroIntroReady = false }: SignatureSe
 
             <div className="stage-inspection-hint" aria-hidden="true">
               <span className="hint-sparkle">✦</span>
-              <span>Gentle drag for bounded inspection</span>
+              <span>360° Spatial Showcase · Drag to rotate</span>
             </div>
           </div>
         </div>

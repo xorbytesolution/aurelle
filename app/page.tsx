@@ -311,6 +311,18 @@ export default function Page() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
+  // Lock body scroll when mobile menu is open
+  useEffect(() => {
+    if (menuOpen) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+    return () => {
+      document.body.style.overflow = ''
+    }
+  }, [menuOpen])
+
   // Live World Clocks Update
   useEffect(() => {
     const updateClocks = () => {
@@ -367,13 +379,14 @@ export default function Page() {
         easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
         smoothWheel: true,
         wheelMultiplier: 0.95,
-        touchMultiplier: 1.5,
+        touchMultiplier: 1.0,
+        syncTouch: true,
       })
       const syncScrollTrigger = () => ScrollTrigger.update()
       const raf = (time: number) => lenis.raf(time * 1000)
       lenis.on('scroll', syncScrollTrigger)
       gsap.ticker.add(raf)
-      gsap.ticker.lagSmoothing(0)
+      gsap.ticker.lagSmoothing(500, 33)
 
       // Dynamic Chapter Atmospheric Palette Transitions (Dark Luxury Film Continuity)
       const chapters = [
@@ -595,6 +608,7 @@ export default function Page() {
 
       requestAnimationFrame(() => ScrollTrigger.refresh())
 
+      const isFinePointer = window.matchMedia('(pointer: fine)').matches
       const moveCursor = (event: MouseEvent) => {
         if (!cursor.current) return
         gsap.to(cursor.current, { x: event.clientX, y: event.clientY, duration: 0.4, ease: 'power3.out' })
@@ -605,22 +619,26 @@ export default function Page() {
       const hoverables = document.querySelectorAll<HTMLElement>('a, button, .cursor-image, .piece-row')
       const enter = () => cursor.current?.classList.toggle('is-hovering', true)
       const leave = () => cursor.current?.classList.toggle('is-hovering', false)
-      window.addEventListener('mousemove', moveCursor)
-      hoverables.forEach((el) => {
-        el.addEventListener('mouseenter', enter)
-        el.addEventListener('mouseleave', leave)
-      })
+      if (isFinePointer) {
+        window.addEventListener('mousemove', moveCursor)
+        hoverables.forEach((el) => {
+          el.addEventListener('mouseenter', enter)
+          el.addEventListener('mouseleave', leave)
+        })
+      }
 
       return () => {
         lenis.off('scroll', syncScrollTrigger)
         lenis.destroy()
         gsap.ticker.remove(raf)
         ScrollTrigger.getAll().forEach((trigger) => trigger.kill())
-        window.removeEventListener('mousemove', moveCursor)
-        hoverables.forEach((el) => {
-          el.removeEventListener('mouseenter', enter)
-          el.removeEventListener('mouseleave', leave)
-        })
+        if (isFinePointer) {
+          window.removeEventListener('mousemove', moveCursor)
+          hoverables.forEach((el) => {
+            el.removeEventListener('mouseenter', enter)
+            el.removeEventListener('mouseleave', leave)
+          })
+        }
       }
     }, root)
     return () => ctx.revert()
@@ -998,7 +1016,7 @@ export default function Page() {
 
         <div className="collection-stage">
           {/* Real-Time Interactive 3D Model Masterwork Showcase */}
-          <div className="collection-image-wrap" style={{ minHeight: '520px', padding: 0 }}>
+          <div className="collection-image-wrap" style={{ padding: 0 }}>
             <Collection3DViewer activeChapter={activeCollection} />
           </div>
 

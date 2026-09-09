@@ -2,13 +2,14 @@
 
 import React, { Suspense, useRef, useMemo, useState, useEffect } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { useGLTF, Environment } from '@react-three/drei'
+import { useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js'
+import StudioEnvironment from '@/lib/StudioEnvironment'
 import gsap from 'gsap'
-import { CINEMATIC_MASS, dampScalar, dampVector3, sacredSlidePhysics } from '@/lib/cinematic-motion'
+import { CINEMATIC_MASS, dampScalar, dampVector3, sacredSlidePhysics, sacredUnthreadPhysics } from '@/lib/cinematic-motion'
 
-export type RingMaterialType = 'platinum' | 'yellow-gold' | 'rose-gold'
+export type RingMaterialType = 'champagne-gold' | 'platinum' | 'yellow-gold' | 'rose-gold'
 
 export interface RingCanvasProps {
   progress: number // normalized master scroll progress [0, 1]
@@ -100,11 +101,13 @@ function CinematicScene({
   progress,
   materialType = 'platinum',
   userRotRef,
+  velocityRef,
   heroIntroReady = false,
 }: {
   progress: number
   materialType?: RingMaterialType
   userRotRef: React.MutableRefObject<{ x: number; y: number }>
+  velocityRef?: React.MutableRefObject<{ x: number; y: number }>
   heroIntroReady?: boolean
 }) {
   const ringGltf = useGLTF(MODEL_RING)
@@ -148,6 +151,14 @@ function CinematicScene({
   const currentRingOpacity = useRef(1.0)
   const currentHandOpacity = useRef(0.0)
 
+  // Physical mass damping state buffers (guaranteeing zero snapping or velocity spikes)
+  const currentRingPos = useRef(new THREE.Vector3(0.18, 0, 0))
+  const currentRingQuat = useRef(new THREE.Quaternion())
+  const currentRingScale = useRef(HAND_CALIBRATION.HERO_RING_SCALE)
+  const currentHandPos = useRef(new THREE.Vector3(HAND_CALIBRATION.HAND_BASE_X_DESKTOP, -10.0, -0.20))
+  const currentHandQuat = useRef(new THREE.Quaternion().setFromEuler(new THREE.Euler(0.10, Math.PI - 0.15, -0.05, 'XYZ')))
+  const isSceneInitialized = useRef(false)
+
   const { size } = useThree()
 
   // 3D continuous spline tracing the true curved centerline of the ring finger
@@ -158,76 +169,118 @@ function CinematicScene({
     return new THREE.CatmullRomCurve3(pts, false, 'centripetal', 0.5)
   }, [])
 
-  // Configure high-luxury PBR materials for the ring
+  // Configure high-luxury PBR materials for the ring (Restoring classic Two-Tone 18K Gold & Sparkling Diamond architecture)
   useEffect(() => {
-    let metalColor = '#f0eee9' // Platinum 950
-    let milgrainColor = '#222220' // Iconic dark charcoal titanium milgrain contrast
-    let metalness = 0.98
-    let roughness = 0.08
-
-    if (materialType === 'yellow-gold') {
-      metalColor = '#ecd08c' // 18K Yellow Gold
-      milgrainColor = '#9a752e'
-      metalness = 0.96
-      roughness = 0.12
-    } else if (materialType === 'rose-gold') {
-      metalColor = '#e8b59e' // 18K Rose Gold
-      milgrainColor = '#8c5040'
-      metalness = 0.96
-      roughness = 0.12
-    }
-
     clonedRingScene.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh
         if (mesh.material) {
-          const matName = ((Array.isArray(mesh.material) ? mesh.material[0]?.name : mesh.material.name) || '').toLowerCase()
-          const meshName = (mesh.name || '').toLowerCase()
+          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+          mats.forEach((m) => {
+            const mat = m as THREE.MeshStandardMaterial
+            const matName = (mat.name || '').toLowerCase()
+            const meshName = (mesh.name || '').toLowerCase()
 
-          const isDiamond = matName.includes('material_2') || matName.includes('diamond') || meshName.includes('dobj') || meshName.startsWith('dmesh')
-          const isMilgrain = meshName.includes('circle006_1') || matName.includes('white gold 2')
+            const isDiamond =
+              matName.includes('material_2') ||
+              matName.includes('diamond') ||
+              meshName.includes('dobj') ||
+              meshName.startsWith('dmesh')
 
-          // Hardware depth layering: metal band is order 1, diamond is order 3
-          mesh.renderOrder = isDiamond ? 3 : 1
+            const isMilgrain =
+              meshName.includes('circle006_1') ||
+              matName.includes('white gold 2')
 
-          if (isDiamond) {
-            mesh.material = new THREE.MeshPhysicalMaterial({
-              color: new THREE.Color('#ffffff'),
-              roughness: 0.0,
-              metalness: 0.0,
-              transmission: 0.98,
-              ior: 2.418,
-              dispersion: 0.044,
-              thickness: 0.45,
-              envMapIntensity: 3.2,
-              depthWrite: true,
-              depthTest: true,
-              transparent: false,
-            })
-          } else if (isMilgrain) {
-            mesh.material = new THREE.MeshStandardMaterial({
-              metalness: 0.96,
-              roughness: 0.22,
-              color: new THREE.Color(materialType === 'platinum' ? '#222220' : milgrainColor),
-              emissive: new THREE.Color(materialType === 'platinum' ? '#10100e' : '#1a1206'),
-              envMapIntensity: 2.4,
-              depthWrite: true,
-              depthTest: true,
-              transparent: false,
-            })
-          } else {
-            const isProng = meshName.includes('prong') || meshName.includes('circle001') || meshName.includes('circle002')
-            mesh.material = new THREE.MeshStandardMaterial({
-              metalness: isProng ? 0.98 : metalness,
-              roughness: isProng ? 0.06 : roughness,
-              color: new THREE.Color(isProng && materialType === 'platinum' ? '#f5f3ee' : metalColor),
-              emissive: new THREE.Color('#000000'),
-              envMapIntensity: 2.8,
-              depthWrite: true,
-              depthTest: true,
-              transparent: false,
-            })
-          }
+            const isProng =
+              meshName.includes('prong') ||
+              meshName.includes('circle001') ||
+              meshName.includes('circle002')
+
+            // Hardware depth layering: metal band is order 1, diamond is order 3
+            mesh.renderOrder = isDiamond ? 3 : 1
+
+            if (isDiamond) {
+              // Scintillating diamond facet refraction & pristine specular brilliance (Matches Hero & Opening)
+              mat.metalness = 0.02
+              mat.roughness = 0.006
+              mat.color = new THREE.Color('#ffffff')
+              mat.emissive = new THREE.Color('#000000')
+              mat.envMapIntensity = 2.6
+              mat.depthWrite = true
+              mat.depthTest = true
+              mat.transparent = false
+            } else if (isMilgrain) {
+              // Central fluted / ribbed milgrain equator channel: Deep burnished antique gold with rich contrast
+              if (materialType === 'platinum') {
+                mat.color = new THREE.Color('#1e2024')
+                mat.emissive = new THREE.Color('#0a0c0e')
+                mat.metalness = 0.96
+                mat.roughness = 0.22
+                mat.envMapIntensity = 2.2
+              } else if (materialType === 'yellow-gold') {
+                mat.color = new THREE.Color('#b08828')
+                mat.emissive = new THREE.Color('#1c1304')
+                mat.metalness = 0.94
+                mat.roughness = 0.24
+                mat.envMapIntensity = 1.8
+              } else if (materialType === 'rose-gold') {
+                mat.color = new THREE.Color('#8c5040')
+                mat.emissive = new THREE.Color('#1a0806')
+                mat.metalness = 0.94
+                mat.roughness = 0.24
+                mat.envMapIntensity = 1.8
+              } else {
+                // Classic Iconic Two-Tone: Deep burnished 18K antique gold channel
+                mat.color = new THREE.Color('#b89344')
+                mat.emissive = new THREE.Color('#1c1304')
+                mat.metalness = 0.94
+                mat.roughness = 0.26
+                mat.envMapIntensity = 1.6
+              }
+              mat.depthWrite = true
+              mat.depthTest = true
+              mat.transparent = false
+            } else if (isProng) {
+              // Pavé prong tracks & diamond crown prongs: Polished 18K White Gold / Platinum contrast
+              mat.color = new THREE.Color(materialType === 'platinum' ? '#f5f4f0' : '#ebe7de')
+              mat.metalness = 0.97
+              mat.roughness = 0.10
+              mat.emissive = new THREE.Color('#000000')
+              mat.envMapIntensity = 2.2
+              mat.depthWrite = true
+              mat.depthTest = true
+              mat.transparent = false
+            } else {
+              // Main ring band chassis & outer framing rims: High-polished 18K Champagne / Royal Gold
+              if (materialType === 'platinum') {
+                mat.color = new THREE.Color('#e2e6ec')
+                mat.metalness = 0.98
+                mat.roughness = 0.10
+                mat.envMapIntensity = 2.8
+              } else if (materialType === 'yellow-gold') {
+                mat.color = new THREE.Color('#e8bf4c')
+                mat.metalness = 0.96
+                mat.roughness = 0.11
+                mat.envMapIntensity = 2.4
+              } else if (materialType === 'rose-gold') {
+                mat.color = new THREE.Color('#e8b59e')
+                mat.metalness = 0.96
+                mat.roughness = 0.11
+                mat.envMapIntensity = 2.4
+              } else {
+                // Classic Iconic Two-Tone: High-polished 18K Champagne / Royal Gold
+                mat.color = new THREE.Color('#cfa856')
+                mat.metalness = 0.96
+                mat.roughness = 0.12
+                mat.envMapIntensity = 2.0
+              }
+              mat.emissive = new THREE.Color('#000000')
+              mat.depthWrite = true
+              mat.depthTest = true
+              mat.transparent = false
+            }
+            mat.needsUpdate = true
+          })
         }
       }
     })
@@ -351,22 +404,22 @@ function CinematicScene({
   const heroRingPosMobile = useMemo(() => new THREE.Vector3(0.0, -0.06, 0), [])
   const scratchMatrix = useMemo(() => new THREE.Matrix4(), [])
 
-  // Post-loader Hero Entrance Animation tracking
-  const introAnim = useRef({ progress: heroIntroReady ? 1 : 0 })
+  // Post-loader Hero Entrance Animation tracking — defaults to 1 so ring is immediately ready and visible
+  const introAnim = useRef({ progress: 1 })
   useEffect(() => {
     if (heroIntroReady) {
-      gsap.to(introAnim.current, {
-        progress: 1,
-        duration: 1.8,
-        ease: 'power3.out',
-      })
+      introAnim.current.progress = 1
     }
   }, [heroIntroReady])
 
+  const isMobile = size.width < 768
+  const handScale = isMobile ? HAND_CALIBRATION.SCALE_MOBILE : HAND_CALIBRATION.SCALE
+  const handBaseX = isMobile ? HAND_CALIBRATION.HAND_BASE_X_MOBILE : HAND_CALIBRATION.HAND_BASE_X_DESKTOP
+
   // Precomputed resting wear anchor points for 360° hand rotation around stationary ring
   const restHandBasePos = useMemo(
-    () => new THREE.Vector3(HAND_CALIBRATION.HAND_BASE_X_DESKTOP, -12.58 * HAND_CALIBRATION.SCALE, -0.20),
-    []
+    () => new THREE.Vector3(handBaseX, -12.58 * handScale, -0.20),
+    [handBaseX, handScale]
   )
   const restHandQuat = useMemo(
     () => new THREE.Quaternion().setFromEuler(new THREE.Euler(0.10, Math.PI - 0.15, -0.05, 'XYZ')),
@@ -374,13 +427,13 @@ function CinematicScene({
   )
   const fixedWearWorldPos = useMemo(() => {
     const localP = slideCurve.getPoint(1.0)
-    const offset = localP.clone().multiplyScalar(HAND_CALIBRATION.SCALE).applyQuaternion(restHandQuat)
+    const offset = localP.clone().multiplyScalar(handScale).applyQuaternion(restHandQuat)
     return restHandBasePos.clone().add(offset)
-  }, [restHandBasePos, restHandQuat])
+  }, [restHandBasePos, restHandQuat, handScale, slideCurve])
   const fixedFingerWorldTan = useMemo(() => {
     const localT = slideCurve.getTangent(1.0).normalize()
     return localT.clone().applyQuaternion(restHandQuat).normalize()
-  }, [restHandQuat])
+  }, [restHandQuat, slideCurve])
   const fixedWearWorldQuat = useMemo(() => {
     const upVec = fixedFingerWorldTan.clone().negate()
     // Hand is flipped 180° around Y: hand-local -Z now points toward camera (dorsal),
@@ -394,19 +447,45 @@ function CinematicScene({
     const rotMatrix = new THREE.Matrix4().makeBasis(lateral, upVec, worldDorsal)
     return new THREE.Quaternion().setFromRotationMatrix(rotMatrix)
   }, [fixedFingerWorldTan, restHandQuat])
-  const tempHandBasePos = useMemo(() => new THREE.Vector3(), [])
-  const tempHandQuat = useMemo(() => new THREE.Quaternion(), [])
+  const fixedWearWorldQuatInv = useMemo(() => {
+    return fixedWearWorldQuat.clone().invert()
+  }, [fixedWearWorldQuat])
+  const handToWearOffset = useMemo(() => {
+    return restHandBasePos.clone().sub(fixedWearWorldPos)
+  }, [restHandBasePos, fixedWearWorldPos])
+  const spinFromRingQuat = useMemo(() => new THREE.Quaternion(), [])
   const tempOffset = useMemo(() => new THREE.Vector3(), [])
   const tempSpinQuat = useMemo(() => new THREE.Quaternion(), [])
+  const flightOriginPos = useMemo(() => new THREE.Vector3(), [])
+  const flightOriginQuat = useMemo(() => new THREE.Quaternion(), [])
 
   useFrame((state, delta) => {
     const dt = Math.min(delta, 0.05)
     const p = Math.max(0, Math.min(1, progress))
     const time = state.clock.getElapsedTime()
-    const isMobile = size.width < 768
 
-    // Hand scale and placement calibrated to 65-70% viewport
-    const handScale = isMobile ? HAND_CALIBRATION.SCALE_MOBILE : HAND_CALIBRATION.SCALE
+    // Inertia decay & damping for tactile dragging (releases smoothly when user lets go)
+    const isInteractiveDrag = (p >= 0.765 && p <= 0.835) || (p >= 0.960 && p <= 0.998)
+    if (velocityRef) {
+      if (isInteractiveDrag) {
+        if (Math.abs(velocityRef.current.y) > 0.00003 || Math.abs(velocityRef.current.x) > 0.00003) {
+          userRotRef.current.y += velocityRef.current.y
+          userRotRef.current.x += velocityRef.current.x
+          if (p <= 0.835) {
+            userRotRef.current.x = Math.max(-0.28, Math.min(0.28, userRotRef.current.x))
+          }
+          velocityRef.current.y *= 0.92
+          velocityRef.current.x *= 0.92
+        }
+      } else {
+        // Gracefully restore manual rotation when outside interactive chapters
+        userRotRef.current.x = dampScalar(userRotRef.current.x, 0, 24.0, dt)
+        userRotRef.current.y = dampScalar(userRotRef.current.y, 0, 24.0, dt)
+        velocityRef.current.x = 0
+        velocityRef.current.y = 0
+      }
+    }
+
     const restingHandBaseY = -12.58 * handScale
     const restingHandBaseX = isMobile ? HAND_CALIBRATION.HAND_BASE_X_MOBILE : HAND_CALIBRATION.HAND_BASE_X_DESKTOP
 
@@ -421,100 +500,83 @@ function CinematicScene({
     let targetHandOpacity = 0.0
     // Hand base position — DORSAL (back-of-hand) view: ring finger faces camera from knuckle side
     // Positioned so hand is framed on right side on desktop, leaving left side for editorial text
-    let handBaseX = restingHandBaseX
+    let curHandBaseX = restingHandBaseX
     let handBaseY = restingHandBaseY
     let handBaseZ = -0.20
     let handRotX = 0.10
     let handRotY = Math.PI - 0.15 // Dorsal (back-of-hand) faces camera — flipped 180° from palm
     let handRotZ = -0.05
 
-    if (p < 0.36) {
+    if (p < 0.34) {
       targetHandOpacity = 0.0
       handBaseY = -10.0 // submerged far off screen
-    } else if (p < 0.48) {
-      // 0.36 -> 0.48: HAND EMERGES VIA PLATINUM RIM LIGHT SILHOUETTE
-      const t = (p - 0.36) / 0.12
+    } else if (p < 0.46) {
+      // 0.34 -> 0.46: HAND EMERGES VIA PLATINUM RIM LIGHT SILHOUETTE (smooth 12% scroll window)
+      const t = (p - 0.34) / 0.12
       const smoothT = t * t * (3 - 2 * t)
       targetHandOpacity = smoothT
       handBaseY = THREE.MathUtils.lerp(-7.5, restingHandBaseY, smoothT)
-    } else if (p < 0.76) {
-      // 0.48 -> 0.76: HAND FULLY PRESENT — stable dorsal pose during entire wearing sequence
+    } else if (p < 0.77) {
+      // 0.46 -> 0.77: HAND FULLY PRESENT — stable dorsal pose during entire wearing sequence
       targetHandOpacity = 1.0
       handBaseY = restingHandBaseY
-    } else if (p < 0.82) {
-      // 0.76 -> 0.82: Ring worn on finger — 360° hand presentation showcase
+    } else if (p < 0.83) {
+      // 0.77 -> 0.83: Ring worn on finger — 360° hand presentation showcase
       targetHandOpacity = 1.0
       handBaseY = restingHandBaseY
       handRotY = Math.PI - 0.15 // Dorsal facing camera
       handRotX = 0.10
       handRotZ = -0.05
-    } else if (p < 0.88) {
-      // 0.82 -> 0.88: THE SACRED UNTHREADING (Hand se nikalna)
-      // Hand gently relaxes and lowers into shadows as ring unthreads backward off the finger
-      const t = (p - 0.82) / 0.06
+    } else if (p < 0.890) {
+      // 0.83 -> 0.890: THE SACRED UNTHREADING (Ring unthreads backward from finger base to tip & enters flight)
+      // The hand remains rock solid at restingHandBaseY so the finger doesn't sink while ring is sliding!
+      targetHandOpacity = 1.0
+      handBaseY = restingHandBaseY
+      handRotY = Math.PI - 0.15
+      handRotX = 0.10
+      handRotZ = -0.05
+    } else if (p < 0.940) {
+      // 0.890 -> 0.940: Ring has cleared fingertip and entered flight!
+      // Hand now gently lowers and dissolves into the darkness
+      const t = (p - 0.890) / 0.050
       const smoothT = t * t * (3 - 2 * t)
-      targetHandOpacity = Math.max(0, 1.0 - smoothT * 1.3)
-      handBaseY = THREE.MathUtils.lerp(restingHandBaseY, -7.5, smoothT)
+      targetHandOpacity = Math.max(0, 1.0 - smoothT)
+      handBaseY = THREE.MathUtils.lerp(restingHandBaseY, -10.0, smoothT)
     } else {
-      // 0.88 -> 1.00: Hand completely lowered and hidden
+      // 0.940 -> 1.00: Hand completely lowered and hidden
       targetHandOpacity = 0.0
       handBaseY = -10.0
     }
 
-    const isWornHold = p >= 0.76 && p < 0.82
-    const currentElevation = isWornHold ? 0 : wristElevation
-    const currentTiltX = isWornHold ? 0 : wristTiltX
-    const currentTiltZ = isWornHold ? 0 : wristTiltZ
+    const isWornSpin = p >= 0.77 && p <= 0.83
+    // Hand remains steady and calm during approach, slide, 360 showcase, and unthreading!
+    const isHandSteady = p >= 0.64 && p <= 0.890
+    const currentElevation = isHandSteady ? 0 : wristElevation
+    const currentTiltX = isHandSteady ? 0 : wristTiltX
+    const currentTiltZ = isHandSteady ? 0 : wristTiltZ
 
-    // Hand Scroll Group: purely responds to scroll timeline
-    const isWornSpin = p >= 0.77 && p < 0.82
-    if (isWornSpin) {
-      // 360° Hand Orbit: Hand revolves around the stationary finger wear axis
-      const t = (p - 0.77) / 0.05
-      const smoothT = t * t * (3 - 2 * t)
-      const spinAngle = smoothT * Math.PI * 2
+    // Outside the 360° showcase, hand follows standard resting pose & scroll emergence
+    // Silky-smooth responsive damping ensures zero jerks when entering/exiting 360° spin or unthreading
+    if (!isWornSpin) {
+      const targetHandPos = scratchVecA.set(curHandBaseX, handBaseY, handBaseZ)
+      const handLambda = (p >= 0.83 && p <= 0.90) ? 24.0 : 8.5
+      dampVector3(currentHandPos.current, targetHandPos, handLambda, dt)
+      currentHandQuat.current.slerp(restHandQuat, 1.0 - Math.exp(-handLambda * dt))
 
-      // Rotate around finger axis (fixedFingerWorldTan) passing through fixedWearWorldPos
-      tempSpinQuat.setFromAxisAngle(fixedFingerWorldTan, spinAngle)
-    } else {
-      tempSpinQuat.identity()
-    }
-
-    if (handRootRef.current) {
-      if (isWornSpin) {
-        tempHandQuat.multiplyQuaternions(tempSpinQuat, restHandQuat)
-
-        const localWearPoint = slideCurve.getPoint(1.0)
-        tempOffset
-          .copy(localWearPoint)
-          .multiplyScalar(handScale)
-          .applyQuaternion(tempHandQuat)
-        tempHandBasePos.subVectors(fixedWearWorldPos, tempOffset)
-
-        handRootRef.current.position.copy(tempHandBasePos)
-        handRootRef.current.quaternion.copy(tempHandQuat)
-      } else {
-        handRootRef.current.position.set(
-          handBaseX,
-          handBaseY,
-          handBaseZ
-        )
-        handRootRef.current.rotation.set(
-          handRotX,
-          handRotY,
-          handRotZ
-        )
+      if (handRootRef.current) {
+        handRootRef.current.position.copy(currentHandPos.current)
+        handRootRef.current.quaternion.copy(currentHandQuat.current)
+        handRootRef.current.scale.setScalar(handScale)
+        handRootRef.current.visible = targetHandOpacity > 0.005
+        handRootRef.current.updateMatrixWorld(true)
       }
-      handRootRef.current.scale.setScalar(handScale)
-      handRootRef.current.visible = targetHandOpacity > 0.005
-      handRootRef.current.updateMatrixWorld(true)
     }
 
     // Hand Idle Group: pure micro-breathing & natural wrist elevation
     if (handIdleGroupRef.current) {
       handIdleGroupRef.current.position.set(0, currentElevation, 0)
       handIdleGroupRef.current.rotation.set(currentTiltX, 0, currentTiltZ)
-      handIdleGroupRef.current.scale.setScalar(isWornHold ? 1.0 : breathingScale)
+      handIdleGroupRef.current.scale.setScalar(isHandSteady ? 1.0 : breathingScale)
       handIdleGroupRef.current.updateMatrixWorld(true)
     }
 
@@ -568,13 +630,13 @@ function CinematicScene({
     const heroRingPos = isMobile ? heroRingPosMobile : heroRingPosDesktop
     const introProgress = Math.min(1, Math.max(0, introAnim.current.progress))
 
-    if (p <= 0.18) {
-      // 00.00 – 00.18: STATE 01 — RING HERO (Horizontal architectural presentation: diamond solitaire & whole band)
-      const t = p / 0.18
+    if (p <= 0.20) {
+      // 00.00 – 00.20: STATE 01 — RING HERO (Horizontal architectural presentation: diamond solitaire & whole band)
+      const t = p / 0.20
       targetCamPos.set(0, isMobile ? 0.08 : 0.18, isMobile ? 2.85 : 1.72)
       targetLookAt.set(0, isMobile ? -0.02 : 0.04, 0)
 
-      if (p <= 0.12) {
+      if (p <= 0.14) {
         if (introProgress < 0.999) {
           // Post-loader entrance: ring glides forward from depth into the hero resting station
           const inv = 1 - introProgress
@@ -587,7 +649,7 @@ function CinematicScene({
           ringTargetPos.copy(heroRingPos)
         }
       } else {
-        const centerT = (p - 0.12) / 0.06
+        const centerT = (p - 0.14) / 0.06
         const smoothCenterT = centerT * centerT * (3 - 2 * centerT)
         ringTargetPos.lerpVectors(heroRingPos, scratchVecA.set(0, 0, 0), smoothCenterT)
       }
@@ -601,13 +663,13 @@ function CinematicScene({
       scratchEuler.set(pitchTilt, yawSpin, rollBank)
       ringTargetQuat.setFromEuler(scratchEuler)
 
-      targetRingOpacity = Math.min(1.0, introProgress * 1.25)
-      targetKeyIntensity = 2.4 * Math.min(1.0, 0.3 + introProgress * 0.7)
+      targetRingOpacity = 1.0
+      targetKeyIntensity = 2.4
       targetSpotIntensity = 2.6
       targetRimIntensity = 2.0
-    } else if (p <= 0.32) {
-      // 00.18 – 00.32: RING ANATOMY / ARCHITECTURE (Horizontal centered inspection)
-      const t = (p - 0.18) / 0.14
+    } else if (p <= 0.34) {
+      // 00.20 – 00.34: RING ANATOMY / ARCHITECTURE (Horizontal centered inspection)
+      const t = (p - 0.20) / 0.14
       const smoothT = t * t * (3 - 2 * t)
       targetCamPos.set(0, isMobile ? 0.08 : 0.18, isMobile ? 2.85 : 1.75)
       targetLookAt.set(0, isMobile ? -0.02 : 0.04, 0)
@@ -622,18 +684,17 @@ function CinematicScene({
       targetRingOpacity = 1.0
       targetKeyIntensity = 2.4
       targetSpotIntensity = 2.6
-    } else if (p <= 0.38) {
-      // 00.32 – 00.38: DARKNESS CHANGES (Camera pulls back to frame the full hand)
-      // Ring smoothly transitions from horizontal center toward upper hover station above the hand
-      const t = (p - 0.32) / 0.06
+    } else if (p <= 0.46) {
+      // 00.34 – 00.46: DARKNESS CHANGES & ASCENT (Camera pulls back smoothly to full hand)
+      // Generous 12% scroll window eliminates any sudden upward velocity spike!
+      const t = (p - 0.34) / 0.12
       const smoothT = t * t * (3 - 2 * t)
-      // Pull back to full-hand framing: Z=9.2 shows the whole hand at ~68% viewport
+      const camZ = isMobile ? 8.5 : HAND_CALIBRATION.HAND_CAM_Z_FULL
       targetCamPos.set(
         0.0,
         THREE.MathUtils.lerp(0.18, HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[1], smoothT),
-        THREE.MathUtils.lerp(isMobile ? 2.85 : 1.75, isMobile ? 12.0 : HAND_CALIBRATION.HAND_CAM_Z_FULL, smoothT)
+        THREE.MathUtils.lerp(isMobile ? 2.85 : 1.75, camZ, smoothT)
       )
-      // LookAt transitions from ring center to hand center
       targetLookAt.lerpVectors(
         scratchVecA.set(0, 0.04, 0),
         scratchVecB.set(
@@ -648,13 +709,12 @@ function CinematicScene({
       scratchQuatA.setFromEuler(scratchEuler)
       ringTargetQuat.slerpQuaternions(scratchQuatA, hoverWorldQuat, smoothT)
       targetRingOpacity = 1.0
-      targetKeyIntensity = 1.6
-      targetRimIntensity = 1.8
-    } else if (p <= 0.48) {
-      // 00.38 – 00.48: HAND SILHOUETTE EMERGES (Platinum rim light sweeps)
-      // Camera at full-hand framing distance — whole hand visible at ~68% viewport
-      const t = (p - 0.38) / 0.10
-      const camZ = isMobile ? 12.0 : HAND_CALIBRATION.HAND_CAM_Z_FULL
+      targetKeyIntensity = THREE.MathUtils.lerp(2.4, 1.4, smoothT)
+      targetRimIntensity = THREE.MathUtils.lerp(2.0, 2.4, smoothT)
+    } else if (p <= 0.56) {
+      // 00.46 – 00.56: HAND REVEALED IN WARM CHAMPAGNE LIGHT (Ring hovers weightlessly above hand)
+      const t = (p - 0.46) / 0.10
+      const camZ = isMobile ? 8.5 : HAND_CALIBRATION.HAND_CAM_Z_FULL
       targetCamPos.set(0.0, HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[1], camZ)
       targetLookAt.set(
         isMobile ? 0.0 : HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[0],
@@ -664,102 +724,46 @@ function CinematicScene({
       ringTargetPos.copy(hoverWorldPos)
       ringTargetQuat.copy(hoverWorldQuat)
       targetRingOpacity = 1.0
-      targetRimIntensity = THREE.MathUtils.lerp(1.8, 2.8, t)
-      targetKeyIntensity = 1.2
-    } else if (p <= 0.58) {
-      // 00.48 – 00.58: HAND REVEALED (Warm champagne key light illuminates)
-      // Full hand visible, ring hover above finger — luxury jewelry commercial framing
-      const t = (p - 0.48) / 0.10
-      const camZ = isMobile ? 12.0 : HAND_CALIBRATION.HAND_CAM_Z_FULL
-      targetCamPos.set(0.0, HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[1], camZ)
-      targetLookAt.set(
-        isMobile ? 0.0 : HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[0],
-        HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[1],
-        HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[2]
-      )
-      ringTargetPos.copy(hoverWorldPos)
-      ringTargetQuat.copy(hoverWorldQuat)
-      targetRingOpacity = 1.0
-      targetKeyIntensity = THREE.MathUtils.lerp(1.2, 1.6, t)
+      targetKeyIntensity = THREE.MathUtils.lerp(1.4, 1.8, t)
       targetRimIntensity = 2.4
-    } else if (p <= 0.62) {
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      // 00.58 – 00.62: ① FLOAT — ring hovers clearly separated from hand
-      // Visitor reads: "This ring is floating in space, about to descend"
-      // Full hand framing: hand ~68% viewport, ring clearly above finger
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      const t = (p - 0.58) / 0.04
-      const smoothT = t * t * (3 - 2 * t)
-
-      sampleSplineInWorld(0.0, ringTargetPos, ringTargetQuat)
-
-      const camZStart = isMobile ? 11.0 : HAND_CALIBRATION.HAND_CAM_Z_FULL
-      const camZEnd = isMobile ? 9.5 : 7.2
-      targetCamPos.set(
-        0.0,
-        THREE.MathUtils.lerp(HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[1], wearWorldPos.y * 0.3, smoothT),
-        THREE.MathUtils.lerp(camZStart, camZEnd, smoothT)
-      )
-      targetLookAt.set(
-        isMobile ? 0.0 : THREE.MathUtils.lerp(HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[0], wearWorldPos.x - 0.08, smoothT * 0.4),
-        THREE.MathUtils.lerp(HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[1], wearWorldPos.y * 0.4, smoothT * 0.5),
-        HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[2]
-      )
-      targetRingOpacity = 1.0
-      targetKeyIntensity = 1.6
-      targetRimIntensity = 2.6
-
-    } else if (p <= 0.66) {
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      // 00.62 – 00.66: ② APPROACH — ring travels elegantly toward ring finger
-      // Curved descent along spline: hover (u=0) → fingertip (u=0.25)
-      // Camera at ring-biased distance: hand ~75% viewport
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      const t = (p - 0.62) / 0.04
+    } else if (p <= 0.64) {
+      // 00.56 – 00.64: THE GRACEFUL DESCENT (Ring glides softly toward fingertip)
+      // Generous 8% scroll window eliminates sudden downward plunge!
+      const t = (p - 0.56) / 0.08
       const smoothT = t * t * (3 - 2 * t)
       const u = smoothT * 0.30
 
       sampleSplineInWorld(u, ringTargetPos, ringTargetQuat)
 
-      const camZApproachStart = isMobile ? 9.5 : 7.2
-      const camZApproachEnd = isMobile ? 8.5 : 6.4  // Zoom in closer as ring nears finger
+      const camZStart = isMobile ? 8.5 : HAND_CALIBRATION.HAND_CAM_Z_FULL
+      const camZEnd = isMobile ? 7.2 : 6.4
       targetCamPos.set(
         0.0,
-        THREE.MathUtils.lerp(wearWorldPos.y * 0.3, wearWorldPos.y * 0.4, smoothT),
-        THREE.MathUtils.lerp(camZApproachStart, camZApproachEnd, smoothT)
+        THREE.MathUtils.lerp(HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[1], wearWorldPos.y * 0.4, smoothT),
+        THREE.MathUtils.lerp(camZStart, camZEnd, smoothT)
       )
       targetLookAt.set(
-        isMobile ? 0.0 : THREE.MathUtils.lerp(wearWorldPos.x - 0.08, wearWorldPos.x - 0.12, smoothT),
-        THREE.MathUtils.lerp(wearWorldPos.y * 0.4, wearWorldPos.y * 0.6, smoothT),
+        isMobile ? 0.0 : THREE.MathUtils.lerp(HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[0], wearWorldPos.x - 0.12, smoothT),
+        THREE.MathUtils.lerp(HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[1], wearWorldPos.y * 0.6, smoothT),
         0
       )
       targetRingOpacity = 1.0
       targetKeyIntensity = 1.8
       targetRimIntensity = 2.6
-
-    } else if (p <= 0.69) {
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      // 00.66 – 00.69: ③ ALIGN — ring pauses at fingertip, visibly aligns axis
-      // Ring wobbles subtly then settles into exact finger-axis orientation.
-      // Visitor reads: "The ring is preparing to go onto the finger"
-      // Camera: ring-biased but hand still visible at ~75% viewport
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      const t = (p - 0.66) / 0.03
+    } else if (p <= 0.68) {
+      // 00.64 – 00.68: COAXIAL ALIGNMENT (Ring settles onto finger axis)
+      const t = (p - 0.64) / 0.04
       const smoothT = t * t * (3 - 2 * t)
 
       sampleSplineInWorld(0.30, ringTargetPos, ringTargetQuat)
 
-      const wobble = Math.sin((1.0 - smoothT) * Math.PI) * 0.08
+      const wobble = Math.sin((1.0 - smoothT) * Math.PI) * 0.06
       scratchEuler.set(wobble, 0, wobble * 0.5)
       scratchQuatA.setFromEuler(scratchEuler)
       ringTargetQuat.multiply(scratchQuatA)
 
-      const camZAlign = isMobile ? 8.0 : 6.0   // Tighter close-up at align moment
-      targetCamPos.set(
-        0.0,
-        wearWorldPos.y * 0.45,
-        camZAlign
-      )
+      const camZAlign = isMobile ? 6.8 : 6.0
+      targetCamPos.set(0.0, wearWorldPos.y * 0.45, camZAlign)
       targetLookAt.set(
         isMobile ? 0.0 : wearWorldPos.x - 0.12,
         wearWorldPos.y * 0.7,
@@ -767,25 +771,18 @@ function CinematicScene({
       )
       targetRingOpacity = 1.0
       targetKeyIntensity = 2.0
-      targetSpotIntensity = 2.0
+      targetSpotIntensity = 2.2
       targetRimIntensity = 2.6
-
-    } else if (p <= 0.76) {
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      // 00.69 – 00.76: ④ SLIDE — THE MOST IMPORTANT MOMENT 💍
-      // Ring slides slowly, continuously from knuckle to base.
-      // Camera: ring+finger context at medium-close. Ring = hero, hand gives context.
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      const t = (p - 0.69) / 0.07
+    } else if (p <= 0.77) {
+      // 00.68 – 00.77: THE SACRED SLIDE (Fluid continuous slide across knuckle)
+      const t = (p - 0.68) / 0.09
       const slideFactor = sacredSlidePhysics(t)
       const u = THREE.MathUtils.lerp(0.30, 1.00, Math.min(1.0, slideFactor))
 
       sampleSplineInWorld(u, ringTargetPos, ringTargetQuat)
 
-      // SLIDE — camera progressively zooms in as ring slides down finger (MOST IMPORTANT MOMENT)
-      // Starts at align distance (6.0) and dollies in tight to HAND_CAM_Z_RING (5.6) at settle
-      const camZSlideStart = isMobile ? 8.0 : 6.0
-      const camZSlide = isMobile ? 7.5 : THREE.MathUtils.lerp(camZSlideStart, HAND_CALIBRATION.HAND_CAM_Z_RING, Math.min(1.0, t * 1.3))
+      const camZSlideStart = isMobile ? 6.8 : 6.0
+      const camZSlide = isMobile ? 6.2 : THREE.MathUtils.lerp(camZSlideStart, HAND_CALIBRATION.HAND_CAM_Z_RING, Math.min(1.0, t * 1.2))
       targetCamPos.set(
         0.0,
         THREE.MathUtils.lerp(wearWorldPos.y * 0.45, wearWorldPos.y * 0.35, Math.min(1.0, t * 1.2)),
@@ -796,237 +793,193 @@ function CinematicScene({
         THREE.MathUtils.lerp(wearWorldPos.y * 0.7, wearWorldPos.y * 0.5, Math.min(1.0, t * 1.2)),
         0
       )
-
       targetRingOpacity = 1.0
       targetKeyIntensity = 2.2
       targetSpotIntensity = 2.2
       targetRimIntensity = 2.8
+    } else if (p <= 0.83) {
+      // 00.77 – 00.83: 360° LIVING SHOWCASE (Interactive & Scroll 360° Living Orbit)
+      const t = (p - 0.77) / 0.06
+      const smoothT = t * t * (3 - 2 * t)
+      const scrollOrbitAngle = smoothT * Math.PI * 2
 
-    } else if (p <= 0.77) {
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      // 00.76 – 00.77: ⑤ SETTLE — spring correction, ring finds its home
-      // Camera at medium-close: ring + finger clearly visible, whole hand in context
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      sampleSplineInWorld(1.0, ringTargetPos, ringTargetQuat)
+      // Combine user manual drag + scroll orbit
+      // When approaching the end of chapter (smoothT > 0.88), gently taper drag offset into rest alignment
+      const dragFade = smoothT > 0.88 ? 1.0 - (smoothT - 0.88) / 0.12 : 1.0
+      const totalOrbitYaw = scrollOrbitAngle + userRotRef.current.y * dragFade
+      const totalOrbitPitch = userRotRef.current.x * dragFade
 
-      const camZSettle = isMobile ? 8.5 : HAND_CALIBRATION.HAND_CAM_Z_RING
-      targetCamPos.set(0.0, wearWorldPos.y * 0.35, camZSettle)
-      targetLookAt.set(
-        isMobile ? 0.0 : wearWorldPos.x - 0.15,
-        wearWorldPos.y * 0.5,
-        0
-      )
-      targetRingOpacity = 1.0
-      targetKeyIntensity = 2.2
-      targetSpotIntensity = 2.2
-      targetRimIntensity = 2.8
+      // Rotation around the ring wear pivot
+      scratchEuler.set(totalOrbitPitch, totalOrbitYaw, 0, 'YXZ')
+      tempSpinQuat.setFromEuler(scratchEuler)
 
-    } else if (p <= 0.82) {
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      // 00.77 – 00.82: ⑥ 360° LIVING HAND & RING ORBIT 💍
-      // The hand and ring rotate 360° together as a single physical entity!
-      // Camera frames the ENTIRE HAND at ~68% viewport — luxury jewelry commercial.
-      // Viewer can clearly understand: hand shape, finger, ring, rotation direction.
-      // At 0° (dorsal): Diamond fully visible on outer side of finger facing camera.
-      // At ~90°: Diamond gradually rotates to side profile.
-      // At ~180° (palm side): Diamond setting rotates behind finger and is
-      // naturally occluded by the finger flesh; only the smooth band is visible!
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      const t = Math.max(0, Math.min(1, (p - 0.77) / 0.05))
+      // Smoothly blend spin quat to absolute identity as 360° revolution completes to prevent angle discontinuity
+      if (smoothT > 0.90) {
+        const blendToRest = (smoothT - 0.90) / 0.10
+        const smoothBlend = blendToRest * blendToRest * (3 - 2 * blendToRest)
+        scratchQuatA.identity()
+        tempSpinQuat.slerp(scratchQuatA, smoothBlend)
+      }
+      if (smoothT >= 0.999) {
+        tempSpinQuat.identity()
+      }
 
-      // Ring stays anchored on finger and rigidly rotates with finger
+      // Ring stays anchored at the wear center, rotating with tempSpinQuat
       ringTargetPos.copy(fixedWearWorldPos)
       ringTargetQuat.multiplyQuaternions(tempSpinQuat, fixedWearWorldQuat)
 
-      // Camera frames the FULL HAND at ~68% viewport
-      const camZ360 = isMobile ? 12.0 : HAND_CALIBRATION.HAND_CAM_Z_FULL
+      const camZ360 = isMobile ? 8.0 : 6.8
       targetCamPos.set(
-        0.0,
-        HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[1] + THREE.MathUtils.lerp(0.0, 0.08, Math.min(1.0, t * 1.5)),
+        isMobile ? 0.0 : -0.10,
+        THREE.MathUtils.lerp(wearWorldPos.y * 0.42, wearWorldPos.y * 0.38, smoothT),
         camZ360
       )
       targetLookAt.set(
-        isMobile ? 0.0 : HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[0],
-        HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[1],
-        HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[2]
-      )
-
-      targetRingOpacity = 1.0
-      targetKeyIntensity = 1.8
-      targetSpotIntensity = 1.6
-      targetRimIntensity = 2.8
-
-    } else if (p <= 0.88) {
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      // 00.82 – 00.88: ⑦ THE SACRED UNTHREADING (Hand se nikalna) 💍✨
-      // The ring reverses smoothly along the finger spline, glides over the knuckle,
-      // and slides completely OFF the finger into free air.
-      // Camera: starts at full-hand framing, then follows ring upward as hand sinks
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      const t = (p - 0.82) / 0.06
-      const smoothT = t * t * (3 - 2 * t)
-
-      // Use sampleSplineInWorld — same function as slide-in — for consistent dorsal orientation
-      const uUnthread = THREE.MathUtils.lerp(1.0, 0.0, Math.min(1.0, smoothT * 1.15))
-      sampleSplineInWorld(Math.max(0, Math.min(1, uUnthread)), ringTargetPos, ringTargetQuat)
-
-      // Extra clearance beyond fingertip as smoothT -> 1.0 (ring floats above fingertip)
-      if (smoothT > 0.78) {
-        const exitBoost = (smoothT - 0.78) / 0.22
-        scratchVecC.copy(fixedFingerWorldTan).multiplyScalar(exitBoost * 0.28)
-        ringTargetPos.add(scratchVecC)
-        // Gently tilt to hero beauty angle as ring exits
-        scratchEuler.set(0.28, 0.42, 0.04)
-        scratchQuatB.setFromEuler(scratchEuler)
-        ringTargetQuat.slerp(scratchQuatB, exitBoost * 0.5)
-      }
-
-      // Camera: starts at ring close-up (matching settle), then pulls back to full-hand as ring exits
-      const camZUnthread = THREE.MathUtils.lerp(
-        isMobile ? 7.5 : HAND_CALIBRATION.HAND_CAM_Z_RING,
-        isMobile ? 9.0 : HAND_CALIBRATION.HAND_CAM_Z_FULL,
-        smoothT
-      )
-      const camXUnthread = isMobile
-        ? THREE.MathUtils.lerp(0.0, ringTargetPos.x * 0.25, smoothT)
-        : THREE.MathUtils.lerp(0.0, ringTargetPos.x - 0.1, smoothT)
-      const camYUnthread = THREE.MathUtils.lerp(
-        wearWorldPos.y * 0.35,
-        ringTargetPos.y + 0.12,
-        smoothT
-      )
-      targetCamPos.set(camXUnthread, camYUnthread, camZUnthread)
-
-      const lookYUnthread = THREE.MathUtils.lerp(
-        wearWorldPos.y * 0.5,
-        ringTargetPos.y,
-        smoothT
-      )
-      targetLookAt.set(
-        isMobile ? 0.0 : THREE.MathUtils.lerp(HAND_CALIBRATION.HAND_FRAME_LOOK_CENTER[0], ringTargetPos.x, smoothT),
-        lookYUnthread,
+        isMobile ? 0.0 : wearWorldPos.x * 0.5,
+        wearWorldPos.y * 0.55,
         0
       )
-
       targetRingOpacity = 1.0
       targetKeyIntensity = 2.4
-      targetSpotIntensity = 2.2
+      targetSpotIntensity = 2.4
       targetRimIntensity = 3.0
+    } else if (p <= 0.90) {
+      // 00.83 – 00.90: THE SACRED UNTHREADING (Continuous anatomical unthreading from finger base into free space)
+      const t = Math.max(0, Math.min(1, (p - 0.83) / 0.07))
+      const u = sacredUnthreadPhysics(t)
 
-    } else if (p <= 0.95) {
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      // 00.88 – 00.95: ⑧ THE CELESTIAL TRAVELING FLIGHT (Travel karti karti) 🌌💎
-      // Ring takes majestic flight across 3D space along a sculptural spatial arc!
-      // Continuous living tumble displays all 57 facets of the solitaire with rainbow dispersion.
-      // The camera swoops and tracks alongside the traveling ring like a luxury film crane.
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      const t = (p - 0.88) / 0.07
+      // 1. Sample exact continuous 3D finger spline trajectory
+      sampleSplineInWorld(u, scratchVecA, scratchQuatA)
 
-      // Flight origin: exact exit point in free air
-      const localTip = slideCurve.getPoint(0.0)
-      scratchVecA
-        .copy(localTip)
-        .multiplyScalar(HAND_CALIBRATION.SCALE)
-        .applyQuaternion(restHandQuat)
-      const flightOrigin = scratchVecB.copy(restHandBasePos).add(scratchVecA)
-      scratchVecC.copy(fixedFingerWorldTan).multiplyScalar(0.38)
-      flightOrigin.add(scratchVecC)
+      const livingSpinRate = 0.85
+      const livingSpin = time * livingSpinRate
 
-      // Flight destination: approaching center horizon of carousel entrance
-      const flightTargetX = 0.0
-      const flightTargetY = 0.08
-      const flightTargetZ = -0.35
+      // Centered spatial flight destination at Chapter 08 entry (p = 0.90)
+      const centerFlightX = isMobile ? 0.0 : 0.04
+      const centerFlightY = 0.06 + Math.sin(time * 1.5) * 0.025
+      const centerFlightZ = -0.06
+      const targetSpatialPos = scratchVecB.set(centerFlightX, centerFlightY, centerFlightZ)
 
-      // 3D S-Arc trajectory across space
-      const arcProgress = t
-      const lateralArc = -Math.sin(arcProgress * Math.PI) * 0.48 + Math.sin(arcProgress * Math.PI * 2) * 0.15
-      const liftArc = Math.sin(arcProgress * Math.PI) * 0.26 + Math.sin(time * 1.6) * 0.015
-      const depthArc = Math.sin(arcProgress * Math.PI) * 0.52 // swoops forward close to camera then glides back
+      // Target beauty presentation orientation at Chapter 08 entry (upright turntable)
+      const totalYaw0 = livingSpin + userRotRef.current.y
+      const pitch0 = 0.28 + Math.sin(totalYaw0) * 0.035 + Math.sin(time * 1.2) * 0.02 + userRotRef.current.x
+      const roll0 = -Math.cos(totalYaw0) * 0.035
+      scratchEuler.set(pitch0, totalYaw0, roll0, 'YXZ')
+      scratchQuatB.setFromEuler(scratchEuler)
 
-      ringTargetPos.set(
-        THREE.MathUtils.lerp(flightOrigin.x, flightTargetX, arcProgress) + lateralArc,
-        THREE.MathUtils.lerp(flightOrigin.y, flightTargetY, arcProgress) + liftArc,
-        THREE.MathUtils.lerp(flightOrigin.z, flightTargetZ, arcProgress) + depthArc
+      // Fingertip is cleared at t ~ 0.65 (u ~ 0.31).
+      // - For t <= 0.65: Ring is strictly guided along finger cylinder (100% coaxial alignment, zero skin clipping)
+      // - For t > 0.65: Ring has cleared the fingertip! Generously and smoothly blends into center flight & upright 360° spin
+      const clearanceThreshold = 0.65
+      if (t <= clearanceThreshold) {
+        ringTargetPos.copy(scratchVecA)
+        ringTargetQuat.copy(scratchQuatA)
+      } else {
+        const blend = (t - clearanceThreshold) / (1.0 - clearanceThreshold)
+        const smoothBlend = blend * blend * (3 - 2 * blend)
+        ringTargetPos.lerpVectors(scratchVecA, targetSpatialPos, smoothBlend)
+        ringTargetQuat.slerpQuaternions(scratchQuatA, scratchQuatB, smoothBlend)
+      }
+
+      const smoothT = t * t * (3 - 2 * t)
+
+      // Cinematic crane camera: seamless continuation from Chapter 06 (camZ 6.8 -> 3.2)
+      // Cranes softly upward and tracks the ring as it slips off the fingertip into space
+      const camZStart = isMobile ? 8.0 : 6.8
+      const camZEnd = isMobile ? 4.2 : 3.2
+      const camZUnthread = THREE.MathUtils.lerp(camZStart, camZEnd, smoothT)
+
+      targetCamPos.set(
+        isMobile ? 0.0 : THREE.MathUtils.lerp(-0.10, 0.0, smoothT),
+        THREE.MathUtils.lerp(wearWorldPos.y * 0.38, 0.16, smoothT),
+        camZUnthread
       )
+      targetLookAt.set(
+        isMobile ? 0.0 : THREE.MathUtils.lerp(wearWorldPos.x * 0.5, 0.04, smoothT),
+        THREE.MathUtils.lerp(wearWorldPos.y * 0.55, 0.06, smoothT),
+        0
+      )
+      targetRingOpacity = 1.0
+      targetKeyIntensity = 2.8
+      targetSpotIntensity = 2.8
+      targetRimIntensity = 3.2
+    } else if (p <= 0.96) {
+      // 00.90 – 00.96: THE CELESTIAL TRAVELING FLIGHT (360° Continuous Living Turntable & Spatial Flight)
+      const t = (p - 0.90) / 0.06
+      const smoothT = t * t * (3 - 2 * t)
 
-      // Continuous traveling pirouette and zero-g tumble revealing facets to lights
-      const spinAngle = arcProgress * Math.PI * 1.8 + time * 0.35
-      const pitchAngle = 0.28 + Math.sin(arcProgress * Math.PI * 2) * 0.18
-      const rollAngle = Math.sin(arcProgress * Math.PI) * 0.16 + Math.cos(time * 0.8) * 0.04
-      scratchEuler.set(pitchAngle, spinAngle, rollAngle)
+      const livingSpinRate = 0.85
+      const livingSpin = time * livingSpinRate
+
+      // Centered spatial station with weightless zero-g levitation bob
+      const flightTargetX = isMobile ? 0.0 : 0.04
+      const flightTargetY = 0.06 + Math.sin(time * 1.5) * 0.025
+      const flightTargetZ = -0.06
+
+      ringTargetPos.set(flightTargetX, flightTargetY, flightTargetZ)
+
+      // FULL 360° CONTINUOUS ROTATION:
+      // 1. Continuous living spin (keeps rotating smoothly 360° even when scrolling stops)
+      // 2. Full 360° scroll-driven revolution across Chapter 08
+      // 3. Tactile 360° user drag rotation with inertial physics momentum
+      const scrollSpin = smoothT * Math.PI * 2
+      const totalYaw = livingSpin + scrollSpin + userRotRef.current.y
+
+      // Upright luxury presentation angle: diamond crown proudly elevated,
+      // subtle organic zero-g breathing pitch & roll synchronized to 360° yaw
+      const flightPitch = 0.28 + Math.sin(totalYaw) * 0.035 + Math.sin(time * 1.2) * 0.02 + userRotRef.current.x
+      const flightRoll = -Math.cos(totalYaw) * 0.035
+
+      scratchEuler.set(flightPitch, totalYaw, flightRoll, 'YXZ')
       ringTargetQuat.setFromEuler(scratchEuler)
 
-      // Cinematic Tracking Crane Camera
-      targetCamPos.set(
-        ringTargetPos.x * 0.45 + 0.12,
-        ringTargetPos.y + 0.18,
-        THREE.MathUtils.lerp(3.8, 2.8, Math.sin(arcProgress * Math.PI))
+      const camZFlight = THREE.MathUtils.lerp(
+        isMobile ? 4.2 : 3.2,
+        isMobile ? 3.6 : 2.85,
+        smoothT
       )
-      targetLookAt.set(ringTargetPos.x, ringTargetPos.y, ringTargetPos.z)
+      targetCamPos.set(
+        0.0,
+        0.16,
+        camZFlight
+      )
+      targetLookAt.set(isMobile ? 0.0 : 0.04, 0.06, 0.0)
 
       targetRingOpacity = 1.0
-      targetKeyIntensity = 3.4
-      targetSpotIntensity = 3.2
-      targetRimIntensity = 3.6 // Prismatic flare across pavilion and diamond crown
-
+      targetKeyIntensity = 3.8
+      targetSpotIntensity = 3.8
+      targetRimIntensity = 4.2
     } else {
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      // 00.95 – 01.00: ⑨ THE THRESHOLD & HIGH LUXURY BEAUTY SHOWCASE 🪐👑
-      // Magnificent 3/4 editorial posture: elevated diamond crown facing viewer,
-      // twin pavé shoulders and sculpted milgrain equator catching radiant studio light.
-      // Continuous physical transit into the Material Carousel below!
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      if (p < 0.975) {
-        // Phase 9A: Center Stage Showcase (Magnificent 3/4 luxury posture)
-        const tSettle = (p - 0.95) / 0.025
-        const smoothSettle = tSettle * tSettle * (3 - 2 * tSettle)
+      // 00.96 – 01.00: THE THRESHOLD & HIGH LUXURY BEAUTY SHOWCASE (Continues 360° Showcase until Carousel)
+      const t = (p - 0.96) / 0.04
+      const smoothT = Math.min(1.0, Math.max(0, t))
+      const smoothTQuad = smoothT * smoothT * (3 - 2 * smoothT)
 
-        ringTargetPos.lerpVectors(
-          scratchVecA.set(isMobile ? 0.0 : 0.08, 0.06, -0.28),
-          scratchVecB.set(isMobile ? 0.0 : 0.08, 0.06, -0.12),
-          smoothSettle
-        )
+      const livingSpinRate = 0.85
+      const livingSpin = time * livingSpinRate
 
-        // Luxury 3/4 editorial beauty angle:
-        // pitch ~0.26 tilts diamond crown forward into view; yaw ~0.42 displays prongs and pavé
-        scratchEuler.set(0.26, 0.42, -0.05)
-        ringTargetQuat.slerp(scratchQuatA.setFromEuler(scratchEuler), 0.22)
+      const heroX = isMobile ? 0.0 : 0.04
+      const heroY = THREE.MathUtils.lerp(0.06, 0.04, smoothTQuad) + Math.sin(time * 1.4) * 0.015
+      const heroZ = THREE.MathUtils.lerp(-0.06, -0.08, smoothTQuad)
 
-        targetCamPos.set(0.0, THREE.MathUtils.lerp(0.18, 0.20, smoothSettle), THREE.MathUtils.lerp(2.9, 2.75, smoothSettle))
-        targetLookAt.set(isMobile ? 0.0 : 0.04, 0.04, 0.0)
+      ringTargetPos.set(heroX, heroY, heroZ)
 
-        targetRingOpacity = 1.0
-        targetKeyIntensity = 3.6
-        targetSpotIntensity = 3.4
-        targetRimIntensity = 3.8
-      } else {
-        // Phase 9B: Gentle Forward Glide & Seamless Section 02 Transition (0.975 -> 1.000)
-        const tDive = (p - 0.975) / 0.025
-        const smoothDive = tDive * tDive * (3 - 2 * tDive)
+      // Seamless continuation of 360° spin into threshold before material carousel
+      const totalYaw9 = livingSpin + (Math.PI * 2) + (smoothTQuad * Math.PI) + userRotRef.current.y
+      const heroPitch = 0.26 + Math.sin(totalYaw9) * 0.03 + userRotRef.current.x
+      const heroRoll = -Math.cos(totalYaw9) * 0.03
 
-        // Gentle forward glide maintaining beauty orientation
-        ringTargetPos.set(
-          isMobile ? 0.0 : 0.08,
-          THREE.MathUtils.lerp(0.06, 0.03, smoothDive),
-          THREE.MathUtils.lerp(-0.12, 0.08, smoothDive)
-        )
+      scratchEuler.set(heroPitch, totalYaw9, heroRoll, 'YXZ')
+      ringTargetQuat.setFromEuler(scratchEuler)
 
-        scratchEuler.set(
-          0.26 + smoothDive * 0.04,
-          0.42 + smoothDive * 0.06,
-          -0.05
-        )
-        ringTargetQuat.setFromEuler(scratchEuler)
+      const camZMaster = THREE.MathUtils.lerp(isMobile ? 3.6 : 2.85, isMobile ? 3.4 : 2.75, smoothTQuad)
+      targetCamPos.set(0.0, THREE.MathUtils.lerp(0.16, 0.20, smoothTQuad), camZMaster)
+      targetLookAt.set(isMobile ? 0.0 : 0.04, 0.04, 0.0)
 
-        targetCamPos.set(0.0, THREE.MathUtils.lerp(0.20, 0.22, smoothDive), THREE.MathUtils.lerp(2.75, 2.90, smoothDive))
-        targetLookAt.set(isMobile ? 0.0 : 0.04, 0.04, 0.0)
-
-        // Soft optical dissolve as Section 01 completes into Material Study
-        targetRingOpacity = p > 0.990 ? THREE.MathUtils.lerp(1.0, 0.0, (p - 0.990) / 0.010) : 1.0
-        targetKeyIntensity = THREE.MathUtils.lerp(3.6, 2.2, smoothDive)
-        targetSpotIntensity = THREE.MathUtils.lerp(3.4, 2.0, smoothDive)
-        targetRimIntensity = THREE.MathUtils.lerp(3.8, 2.4, smoothDive)
-      }
+      targetRingOpacity = p > 0.994 ? THREE.MathUtils.lerp(1.0, 0.0, (p - 0.994) / 0.006) : 1.0
+      targetKeyIntensity = THREE.MathUtils.lerp(3.8, 2.8, smoothTQuad)
+      targetSpotIntensity = THREE.MathUtils.lerp(3.8, 2.6, smoothTQuad)
+      targetRimIntensity = THREE.MathUtils.lerp(4.2, 3.0, smoothTQuad)
     }
 
     // ------------------------------------------------------------------------
@@ -1051,64 +1004,101 @@ function CinematicScene({
     )
     state.camera.lookAt(currentLookAt.current)
 
-    // Update Ring Root (ScrollTransformGroup)
-    // During 360° hand orbit, lock ring rotation 100% rigidly (1.0) to finger with zero delay
-    // During slide / settle / unthreading the finger moves every frame — use tight tracking (0.42).
-    // During celestial flight across space, use luxurious smooth inertia (0.16).
-    // During descent into carousel, track scroll decisively (0.32).
-    // During hero / anatomy / approach use smooth cinematic lerp (0.08).
-    const isFingerTracking = p >= 0.69 && p < 0.88
-    const isFlightPhase = p >= 0.88 && p <= 1.0
-    const isDescentPhase = p >= 0.975
-    const ringLerp = isWornSpin ? 1.0 : isFingerTracking ? 0.42 : isDescentPhase ? 0.32 : isFlightPhase ? 0.16 : 0.08
+    // Dynamic scale calculation: macro during hero, snug on finger, heroic during flight
+    const introScale = p <= 0.14 ? THREE.MathUtils.lerp(0.82, 1.0, introProgress) : 1.0
+    const heroScale = isMobile ? HAND_CALIBRATION.HERO_RING_SCALE_MOBILE : HAND_CALIBRATION.HERO_RING_SCALE
+    const wearScale = isMobile ? HAND_CALIBRATION.RING_PHYSICAL_SCALE_MOBILE : HAND_CALIBRATION.RING_PHYSICAL_SCALE
 
-    if (ringRootRef.current) {
-      ringRootRef.current.visible = (heroIntroReady || p > 0.005) && currentRingOpacity.current > 0.005
-      const introScale = p <= 0.12 ? THREE.MathUtils.lerp(0.82, 1.0, introProgress) : 1.0
-      const heroScale = isMobile ? HAND_CALIBRATION.HERO_RING_SCALE_MOBILE : HAND_CALIBRATION.HERO_RING_SCALE
-      const wearScale = isMobile ? HAND_CALIBRATION.RING_PHYSICAL_SCALE_MOBILE : HAND_CALIBRATION.RING_PHYSICAL_SCALE
-
-      // Dynamic scale curve: "ring badi kar but jab finger me jaye tab coti kar ke set kardena"
-      let dynamicScale = heroScale
-      if (p <= 0.32) {
-        // Hero & Anatomy: Grand, bold, macro presentation
-        dynamicScale = heroScale
-      } else if (p <= 0.66) {
-        // Approach: Ring smoothly contracts down as it approaches the fingertip
-        const t = (p - 0.32) / 0.34
-        const smoothT = t * t * (3 - 2 * t)
-        dynamicScale = THREE.MathUtils.lerp(heroScale, wearScale, smoothT)
-      } else if (p <= 0.82) {
-        // Align, Slide, Settle & 360° Orbit: Exact snug anatomical fit on the ring finger (zero clipping)
-        dynamicScale = wearScale
-      } else if (p <= 0.92) {
-        // Sacred Release & Celestial Flight: Expands back into space as hero jewel
-        const t = (p - 0.82) / 0.10
-        const smoothT = t * t * (3 - 2 * t)
-        dynamicScale = THREE.MathUtils.lerp(wearScale, heroScale * 0.90, smoothT)
-      } else {
-        // Climax & Carousel descent
-        dynamicScale = heroScale * 0.90
-      }
-
-      ringRootRef.current.scale.setScalar(dynamicScale * introScale)
-      ringRootRef.current.position.lerp(ringTargetPos, ringLerp)
-      ringRootRef.current.quaternion.slerp(ringTargetQuat, ringLerp)
+    let dynamicScale = heroScale
+    if (p <= 0.34) {
+      dynamicScale = heroScale
+    } else if (p <= 0.64) {
+      const t = (p - 0.34) / 0.30
+      const smoothT = t * t * (3 - 2 * t)
+      dynamicScale = THREE.MathUtils.lerp(heroScale, wearScale, smoothT)
+    } else if (p <= 0.83) {
+      dynamicScale = wearScale
+    } else if (p <= 0.90) {
+      // Unthreading from finger: maintain exact snug physical scale
+      dynamicScale = wearScale
+    } else if (p <= 0.96) {
+      // Celestial flight: smoothly expand from wearScale to heroScale!
+      const t = (p - 0.90) / 0.06
+      const smoothT = t * t * (3 - 2 * t)
+      dynamicScale = THREE.MathUtils.lerp(wearScale, heroScale, smoothT)
+    } else {
+      dynamicScale = heroScale
     }
 
-    // Update Ring Motion Group (Tactile bounded inspection in Chapter 09)
-    if (ringMotionGroupRef.current) {
-      if (p >= 0.945 && p <= 0.998) {
-        ringMotionGroupRef.current.rotation.set(userRotRef.current.x, userRotRef.current.y, 0)
-      } else {
-        ringMotionGroupRef.current.rotation.set(0, 0, 0)
+    // Initialize physical state buffers on first frame to prevent startup pop
+    if (!isSceneInitialized.current) {
+      currentRingPos.current.copy(ringTargetPos)
+      currentRingQuat.current.copy(ringTargetQuat)
+      currentRingScale.current = dynamicScale * introScale
+      currentHandPos.current.copy(restHandBasePos)
+      isSceneInitialized.current = true
+    }
+
+    // Physical mass damping: frame-rate independent, eliminating sudden snaps or speed bursts
+    // High-responsiveness touch tracking maintained throughout slide, 360 orbit, unthreading, and 360 spatial flight
+    const isTouchTracking = p >= 0.68 && p <= 0.90
+    const isInteractiveSpatial = p >= 0.898 && p <= 0.998
+    const posLambda = isTouchTracking ? 24.0 : 8.5
+    const rotLambda = (isTouchTracking || isInteractiveSpatial) ? 22.0 : 8.5
+
+    // Apply inertia velocity to userRotRef and smoothly damp with physical deceleration
+    if (velocityRef?.current) {
+      userRotRef.current.x += velocityRef.current.x
+      userRotRef.current.y += velocityRef.current.y
+      velocityRef.current.x *= 0.92
+      velocityRef.current.y *= 0.92
+    }
+
+    dampVector3(currentRingPos.current, ringTargetPos, posLambda, dt)
+
+    const rotDamp = 1.0 - Math.exp(-rotLambda * dt)
+    currentRingQuat.current.slerp(ringTargetQuat, rotDamp)
+
+    currentRingScale.current = dampScalar(currentRingScale.current, dynamicScale * introScale, 8.0, dt)
+
+    if (ringRootRef.current) {
+      ringRootRef.current.visible = currentRingOpacity.current > 0.005
+      ringRootRef.current.scale.setScalar(currentRingScale.current)
+      ringRootRef.current.position.copy(currentRingPos.current)
+      ringRootRef.current.quaternion.copy(currentRingQuat.current)
+    }
+
+    // Synchronize Hand during 360° showcase around the ring wear pivot
+    if (isWornSpin) {
+      // Extract exact spin orientation of the ring
+      spinFromRingQuat.multiplyQuaternions(currentRingQuat.current, fixedWearWorldQuatInv)
+
+      // Rigid body transformation: Hand Base revolves around currentRingPos
+      currentHandPos.current
+        .copy(currentRingPos.current)
+        .add(tempOffset.copy(handToWearOffset).applyQuaternion(spinFromRingQuat))
+
+      // Hand orientation matches the spin
+      currentHandQuat.current.multiplyQuaternions(spinFromRingQuat, restHandQuat)
+
+      if (handRootRef.current) {
+        handRootRef.current.position.copy(currentHandPos.current)
+        handRootRef.current.quaternion.copy(currentHandQuat.current)
+        handRootRef.current.scale.setScalar(handScale)
+        handRootRef.current.visible = currentHandOpacity.current > 0.005
+        handRootRef.current.updateMatrixWorld(true)
       }
+    }
+
+    // Update Ring Motion Group (Tactile userRotRef is already integrated directly into ringTargetQuat)
+    if (ringMotionGroupRef.current) {
+      ringMotionGroupRef.current.rotation.set(0, 0, 0)
     }
 
     // Update Ring Idle Group (Component 09: The Breathing Rule)
     if (ringIdleGroupRef.current) {
-      // During active tactile slide & 360° worn orbit, zero out idle wobble relative to the finger
-      const isSlideOrOrbit = (p >= 0.62 && p <= 0.78) || isWornSpin
+      // During active tactile slide, 360° worn orbit & unthreading, zero out idle wobble relative to the finger
+      const isSlideOrOrbit = p >= 0.64 && p <= 0.90
       const idleIntensity = isSlideOrOrbit ? 0.0 : 1.0
 
       const ringIdleY = Math.sin(time * 0.75) * 0.005 * idleIntensity
@@ -1130,7 +1120,8 @@ function CinematicScene({
             const mat = m as THREE.MeshStandardMaterial
             mat.opacity = rOp
             mat.visible = rOp > 0.005
-            mat.depthWrite = rOp > 0.15
+            mat.depthWrite = rOp > 0.85
+            mat.transparent = rOp < 0.99
           })
         }
       }
@@ -1207,7 +1198,7 @@ function CinematicScene({
         angle={0.8}
         penumbra={0.9}
       />
-      <Environment preset="studio" environmentIntensity={1.25} />
+      <StudioEnvironment intensity={1.25} />
 
       {/* =====================================================================
           3D HAND: ScrollTransformGroup -> MotionTransformGroup -> IdleTransformGroup
@@ -1239,7 +1230,7 @@ function CinematicScene({
 
 export default function RingCanvas({
   progress = 0,
-  materialType = 'platinum',
+  materialType = 'champagne-gold',
   onDragStateChange,
   heroIntroReady = false,
 }: RingCanvasProps) {
@@ -1250,45 +1241,33 @@ export default function RingCanvas({
   const [isCursorGrabbing, setIsCursorGrabbing] = useState(false)
   const lastProgressRef = useRef(progress)
 
-  // Scrolling immediately takes priority over tactile drag
+  // Scrolling takes priority when exiting interactive chapters
   useEffect(() => {
     const diff = Math.abs(progress - lastProgressRef.current)
-    if (diff > 0.002) {
+    const isInsideWornChapter = progress >= 0.76 && progress <= 0.835
+    const isInsideSpatialChapter = progress >= 0.898 && progress <= 0.998
+
+    const thresholdDiff = (isInsideWornChapter || isInsideSpatialChapter) ? 0.025 : 0.002
+    if (diff > thresholdDiff) {
       if (isDraggingRef.current) {
         isDraggingRef.current = false
         setIsCursorGrabbing(false)
         onDragStateChange?.(false)
       }
-      userRotRef.current.x *= 0.82
-      userRotRef.current.y *= 0.82
-      velocityRef.current.x = 0
-      velocityRef.current.y = 0
+      if (!isInsideWornChapter && !isInsideSpatialChapter) {
+        userRotRef.current.x *= 0.82
+        userRotRef.current.y *= 0.82
+        velocityRef.current.x = 0
+        velocityRef.current.y = 0
+      }
     }
     lastProgressRef.current = progress
   }, [progress, onDragStateChange])
 
-  // Smooth return damping when inspection ends
-  useEffect(() => {
-    let animId: number
-    const tick = () => {
-      if (!isDraggingRef.current) {
-        userRotRef.current.x += velocityRef.current.x
-        userRotRef.current.y += velocityRef.current.y
-        velocityRef.current.x *= 0.88
-        velocityRef.current.y *= 0.88
-
-        // Smoothly spring back to 0 (hero orientation)
-        userRotRef.current.x *= 0.94
-        userRotRef.current.y *= 0.94
-      }
-      animId = requestAnimationFrame(tick)
-    }
-    animId = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(animId)
-  }, [])
-
-  // Bounded luxury inspection is active throughout Chapter 09 The Threshold
-  const canDrag = progress >= 0.945 && progress <= 0.998
+  // Drag interaction is active for Chapter 06 (360° Hand+Ring Orbit) AND Chapter 08 & 09 (Spatial Flight & Threshold)
+  const isWornOrbit = progress >= 0.765 && progress <= 0.835
+  const isSpatialInspection = progress >= 0.898 && progress <= 0.998
+  const canDrag = isWornOrbit || isSpatialInspection
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!canDrag) return
@@ -1306,21 +1285,29 @@ export default function RingCanvas({
     const dy = e.clientY - lastPointerRef.current.y
     lastPointerRef.current = { x: e.clientX, y: e.clientY }
 
-    const speedX = dy * 0.0025
-    const speedY = dx * 0.0035
+    if (isWornOrbit) {
+      // 360° Living Showcase: unconstrained continuous 360° rotation around the finger
+      const speedY = dx * 0.0055
+      const speedX = dy * 0.0028
 
-    // Bounded Luxury Inspection:
-    // Horizontal rotation limited to approximately ±45°
-    // Vertical rotation limited to approximately ±15°
-    userRotRef.current.x = Math.max(
-      -HAND_CALIBRATION.BOUNDED_PITCH_MAX,
-      Math.min(HAND_CALIBRATION.BOUNDED_PITCH_MAX, userRotRef.current.x + speedX)
-    )
-    userRotRef.current.y = Math.max(
-      -HAND_CALIBRATION.BOUNDED_YAW_MAX,
-      Math.min(HAND_CALIBRATION.BOUNDED_YAW_MAX, userRotRef.current.y + speedY)
-    )
-    velocityRef.current = { x: speedX * 0.4, y: speedY * 0.4 }
+      userRotRef.current.y += speedY
+      userRotRef.current.x = Math.max(
+        -0.28,
+        Math.min(0.28, userRotRef.current.x + speedX)
+      )
+      velocityRef.current = { x: speedX * 0.35, y: speedY * 0.60 }
+    } else if (isSpatialInspection) {
+      // 360° Spatial Flight & Masterpiece Showcase: unconstrained continuous 360° turntable spin
+      const speedY = dx * 0.0065
+      const speedX = dy * 0.0030
+
+      userRotRef.current.y += speedY
+      userRotRef.current.x = Math.max(
+        -0.45,
+        Math.min(0.45, userRotRef.current.x + speedX)
+      )
+      velocityRef.current = { x: speedX * 0.35, y: speedY * 0.60 }
+    }
   }
 
   const handlePointerUp = () => {
@@ -1344,7 +1331,8 @@ export default function RingCanvas({
     >
       <Canvas
         camera={{ position: [0, 0.18, 1.40], fov: 28 }}
-        dpr={[1, 1.5]}
+        dpr={typeof window !== 'undefined' && window.innerWidth < 768 ? [1, 1.25] : [1, 1.5]}
+        frameloop="always"
         gl={{
           antialias: true,
           alpha: true,
@@ -1356,6 +1344,7 @@ export default function RingCanvas({
             progress={progress}
             materialType={materialType}
             userRotRef={userRotRef}
+            velocityRef={velocityRef}
             heroIntroReady={heroIntroReady}
           />
         </Suspense>

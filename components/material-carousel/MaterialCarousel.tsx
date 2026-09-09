@@ -25,24 +25,22 @@ export default function MaterialCarousel() {
         trigger: containerRef.current,
         pin: pinRef.current,
         start: 'top top',
-        end: '+=5000px',
-        scrub: 1.4,
+        end: '+=3800px',
+        scrub: 1.0,
         anticipatePin: 1,
         onUpdate: (self) => {
           const p = Math.max(0, Math.min(1, self.progress))
           setProgress(p)
 
-          // Synchronize active metal naming so the name changes ONLY when the incoming ring
-          // actually arrives at the center stage, never prematurely!
-          // 0.00 – 0.36: Platinum 950 (Hold 0.12 - 0.28, transit to Yellow Gold 0.28 - 0.38)
-          // 0.36 – 0.58: 18K Yellow Gold (Hold 0.38 - 0.50, transit to Rose Gold 0.50 - 0.60)
-          // 0.58 – 0.80: 18K Rose Gold (Hold 0.60 - 0.72, transit to Champagne Gold 0.72 - 0.82)
-          // 0.80 – 1.00: Champagne Gold (Hold 0.82 - 0.90, Choice & Exit 0.90 - 1.00)
-          if (p < 0.36) {
+          // Smoothly synchronize active metal name across the continuous orbit
+          // 0: Platinum, 1: Yellow Gold, 2: Rose Gold, 3: Champagne Gold
+          const normP = Math.max(0, Math.min(1, (p - 0.08) / 0.78))
+          const approxIdx = Math.round(normP * 3)
+          if (approxIdx <= 0) {
             setActiveMetal('platinum')
-          } else if (p < 0.58) {
+          } else if (approxIdx === 1) {
             setActiveMetal('yellow-gold')
-          } else if (p < 0.80) {
+          } else if (approxIdx === 2) {
             setActiveMetal('rose-gold')
           } else {
             setActiveMetal('champagne-gold')
@@ -58,10 +56,10 @@ export default function MaterialCarousel() {
     setActiveMetal(metal)
     materialStore.setSelectedMaterial(metal)
 
-    // Smoothly scroll window to the exact centered hold progress for this metal
+    // Smoothly scroll window to the exact centered station for this metal
     if (containerRef.current) {
       const targetP =
-        metal === 'platinum' ? 0.20 : metal === 'yellow-gold' ? 0.44 : metal === 'rose-gold' ? 0.66 : 0.86
+        metal === 'platinum' ? 0.12 : metal === 'yellow-gold' ? 0.36 : metal === 'rose-gold' ? 0.62 : 0.86
 
       const trigger = ScrollTrigger.getAll().find(
         (st) => st.trigger === containerRef.current

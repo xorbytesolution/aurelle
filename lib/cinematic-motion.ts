@@ -99,3 +99,19 @@ export function sacredSlidePhysics(t: number): number {
     return 1.0 + 0.036 * settle
   }
 }
+
+/**
+ * Organic Reverse Unthreading Physics:
+ * Continuous, fluid, physical slide off the ring finger into free air.
+ * Maps normalized unthreading progress t in [0, 1] to spline coordinate u in [1.00, 0.04]:
+ * - t = 0.00 -> u = 1.00 (snug resting base)
+ * - t = 0.65 -> u = 0.31 (cleanly clearing the fingertip)
+ * - t = 1.00 -> u = 0.04 (in free space, poised for celestial flight)
+ * Seamless, continuously-differentiable (C1) ease curve eliminating zero-velocity hesitation.
+ */
+export function sacredUnthreadPhysics(t: number): number {
+  const k = Math.max(0, Math.min(1, t))
+  // Smooth cubic ease: silky initial release -> steady momentum past knuckle -> fluid clearance off fingertip
+  const smoothK = k * k * (3 - 2 * k)
+  return 1.00 - smoothK * 0.96
+}

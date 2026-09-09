@@ -2,9 +2,10 @@
 
 import React, { Suspense, useRef, useMemo, useEffect } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { useGLTF, Center, Environment } from '@react-three/drei'
+import { useGLTF, Center } from '@react-three/drei'
 import * as THREE from 'three'
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js'
+import StudioEnvironment from '@/lib/StudioEnvironment'
 
 const MODEL_PATH = '/models/doji-diamond-ring.glb'
 useGLTF.preload(MODEL_PATH)
@@ -142,7 +143,7 @@ function HeroRingScene() {
         angle={0.8}
         penumbra={0.9}
       />
-      <Environment preset="studio" environmentIntensity={0.85} />
+      <StudioEnvironment intensity={0.85} />
 
       <group ref={groupRef} scale={responsiveScale} position={[isMobile ? 0 : 0.85, isMobile ? -0.4 : 0.05, 0]}>
         <Center>

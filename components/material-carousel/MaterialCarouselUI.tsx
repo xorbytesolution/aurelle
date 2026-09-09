@@ -97,8 +97,8 @@ export default function MaterialCarouselUI({
       <div
         className="material-dossier-panel"
         style={{
-          opacity: progress >= 0.04 && !isChoicePhase && !isExitPhase ? 1 : 0,
-          transform: progress >= 0.04 && !isChoicePhase && !isExitPhase ? 'translate(-50%, 0)' : 'translate(-50%, 20px)',
+          opacity: !isChoicePhase && !isExitPhase ? 1 : 0,
+          transform: !isChoicePhase && !isExitPhase ? 'translate(-50%, 0)' : 'translate(-50%, 20px)',
           pointerEvents: !isChoicePhase && !isExitPhase ? 'auto' : 'none',
           transition: 'all 0.6s cubic-bezier(0.16, 1, 0.3, 1)',
         }}

@@ -2,9 +2,10 @@
 
 import React, { Suspense, useRef, useMemo, useState, useEffect } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { useGLTF, Center, Environment } from '@react-three/drei'
+import { useGLTF, Center } from '@react-three/drei'
 import * as THREE from 'three'
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js'
+import StudioEnvironment from '@/lib/StudioEnvironment'
 
 const MODEL_PATH = '/models/doji-diamond-ring.glb'
 useGLTF.preload(MODEL_PATH)
@@ -147,7 +148,7 @@ function CollectionRing({ activeChapter, isMacroZoom }: { activeChapter: number;
         distance={24}
       />
       <spotLight position={[0, 5, -6]} intensity={2.2} color="#dbe7ff" angle={0.8} penumbra={0.9} />
-      <Environment preset="studio" environmentIntensity={1.3} />
+      <StudioEnvironment intensity={1.3} />
 
       <group ref={groupRef} scale={scale} position={[0, 0, 0]}>
         <Center>
@@ -160,15 +161,18 @@ function CollectionRing({ activeChapter, isMacroZoom }: { activeChapter: number;
 
 export default function Collection3DViewer({ activeChapter }: Collection3DViewerProps) {
   const [isMacroZoom, setIsMacroZoom] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
 
   return (
     <div
+      ref={containerRef}
       className="collection-3d-container"
       style={{
         position: 'relative',
         width: '100%',
         height: '100%',
-        minHeight: '480px',
+        minHeight: '380px',
+        touchAction: 'pan-y',
         background: 'radial-gradient(ellipse 70% 70% at 50% 45%, #121417 0%, #050608 100%)',
         borderRadius: '4px',
         overflow: 'hidden',
@@ -177,7 +181,8 @@ export default function Collection3DViewer({ activeChapter }: Collection3DViewer
     >
       <Canvas
         camera={{ position: [0, 0.12, 1.85], fov: 32 }}
-        dpr={[1, 2]}
+        dpr={typeof window !== 'undefined' && window.innerWidth < 768 ? [1, 1.25] : [1, 1.5]}
+        frameloop="always"
         gl={{
           antialias: true,
           powerPreference: 'high-performance',

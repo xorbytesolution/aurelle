@@ -3,7 +3,8 @@
 import React, { useMemo, useRef, useState, useEffect, Suspense } from 'react'
 import * as THREE from 'three'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { useGLTF, Environment } from '@react-three/drei'
+import { useGLTF } from '@react-three/drei'
+import StudioEnvironment from '@/lib/StudioEnvironment'
 import MaterialRing, { RingTransformState } from './MaterialRing'
 import { PreciousMetal, PRECIOUS_METALS } from './glbMaterialClassifier'
 import { materialStore, useMaterialStore } from './useMaterialStore'
@@ -86,40 +87,25 @@ function SpatialJewelleryUniverse({
   const currentLookAt = useRef(new THREE.Vector3(0, 0.08, 0))
   const targetLookAt = useRef(new THREE.Vector3(0, 0.08, 0))
 
-  // Map scroll progress to target orbital angle with calibrated hero holds and smooth transit:
-  // 0.00 – 0.28: PLATINUM HERO HOLD (targetIdx = 0)
-  // 0.28 – 0.38: TRANSITION 1 (Platinum -> 18K Yellow Gold)
-  // 0.38 – 0.50: 18K YELLOW GOLD HERO HOLD (targetIdx = 1)
-  // 0.50 – 0.60: TRANSITION 2 (Yellow Gold -> 18K Rose Gold)
-  // 0.60 – 0.72: 18K ROSE GOLD HERO HOLD (targetIdx = 2)
-  // 0.72 – 0.82: TRANSITION 3 (Rose Gold -> Champagne Gold)
-  // 0.82 – 0.90: CHAMPAGNE GOLD HERO HOLD (targetIdx = 3)
-  // 0.90 – 0.96: MATERIAL CHOICE ("Yours, in your metal.")
-  // 0.96 – 1.00: CONTINUITY EXIT
+  // Map scroll progress to target orbital angle with continuous silky-smooth Hermite interpolation:
+  // 0.08 – 0.88: Continuous organic glide across Platinum -> Yellow Gold -> Rose Gold -> Champagne Gold
+  // 0.88 – 0.96: Material Choice ("Yours, in your metal.")
+  // 0.96 – 1.00: Smooth unpin continuity
   useEffect(() => {
     if (interactionModeRef.current === 'drag') return
 
     let targetIdx = 0
-    if (progress < 0.28) {
-      targetIdx = 0 // Platinum Hero hold
-    } else if (progress < 0.38) {
-      const t = (progress - 0.28) / 0.10
-      const smoothT = t * t * (3 - 2 * t)
-      targetIdx = smoothT // 0 -> 1 Transition to Yellow Gold
-    } else if (progress < 0.50) {
-      targetIdx = 1 // 18K Yellow Gold Hero hold
-    } else if (progress < 0.60) {
-      const t = (progress - 0.50) / 0.10
-      const smoothT = t * t * (3 - 2 * t)
-      targetIdx = 1 + smoothT // 1 -> 2 Transition to Rose Gold
-    } else if (progress < 0.72) {
-      targetIdx = 2 // 18K Rose Gold Hero hold
-    } else if (progress < 0.82) {
-      const t = (progress - 0.72) / 0.10
-      const smoothT = t * t * (3 - 2 * t)
-      targetIdx = 2 + smoothT // 2 -> 3 Transition to Champagne Gold
-    } else if (progress < 0.90) {
-      targetIdx = 3 // Champagne Gold Hero hold
+    if (progress < 0.08) {
+      targetIdx = 0
+    } else if (progress <= 0.88) {
+      // Continuous smooth hermite spline across the 4 metals (0 -> 1 -> 2 -> 3)
+      const pNorm = (progress - 0.08) / 0.80
+      const rawStation = pNorm * 3
+      const baseStation = Math.floor(rawStation)
+      const fraction = rawStation - baseStation
+      // Smooth hermite ease: natural deceleration at each station, smooth acceleration between
+      const smoothFraction = fraction * fraction * (3 - 2 * fraction)
+      targetIdx = Math.min(3, baseStation + smoothFraction)
     } else {
       // Material choice: hold on user's selected metal
       const selIdx = METALS.indexOf(selectedMaterial)
@@ -141,13 +127,13 @@ function SpatialJewelleryUniverse({
     }
   }, [selectedMaterial, interactionModeRef])
 
-  // Spatial Orbital Dimensions (Prompt Requirement #1 & #2):
-  // Wide amphitheatre layout where Left, Right, and Back Elevated rings are always visible
-  const Rx = isMobile ? 1.75 : 2.45 // Horizontal orbital radius
-  const Rz = 1.35 // Depth radius
-  const Z_CENTER = -0.90 // Orbit center in world space
-  const FRONT_SCALE = isMobile ? 2.2 : 2.85 // Hero ring elegant luxury scale
-  const BACK_SCALE = isMobile ? 1.2 : 1.5 // Distant ring scale
+  // Spatial Orbital Dimensions:
+  // Wide amphitheatre layout where Left, Right, and Back Elevated rings are visible with heroic presence
+  const Rx = isMobile ? 1.85 : 2.65 // Horizontal orbital radius
+  const Rz = 1.30 // Depth radius
+  const Z_CENTER = -0.85 // Orbit center in world space
+  const FRONT_SCALE = isMobile ? 2.5 : 3.35 // Hero ring commanding luxury scale
+  const BACK_SCALE = isMobile ? 1.35 : 1.65 // Distant ring scale
 
   // Pre-allocated ring states buffer to avoid GC pauses with individual visibility and opacity
   const ringStates = useMemo<RingTransformState[]>(() => {
@@ -155,8 +141,8 @@ function SpatialJewelleryUniverse({
       pos: [0, 0, 0],
       rot: [0.26, 0.42, -0.05],
       scale: FRONT_SCALE,
-      opacity: i === 0 ? 1.0 : 0.0,
-      visible: i === 0,
+      opacity: 1.0,
+      visible: true,
       isFocused: i === 0,
     }))
   }, [FRONT_SCALE])
@@ -165,6 +151,7 @@ function SpatialJewelleryUniverse({
 
   useFrame((state, delta) => {
     const dt = Math.min(delta, 0.05)
+    const isMobile = state.size.width < 768
 
     // 1. Smoothly damp carousel angle toward target + drag with luxury sculpture inertia (Component 07)
     const target = targetTheta.current + dragOffsetRef.current
@@ -279,38 +266,32 @@ function SpatialJewelleryUniverse({
       }
 
       // ━━━ REAR SIGHTLINE REFINEMENT ━━━
-      // In the rear hemisphere (depthFactor < 0.58), ensure rings orbit gracefully on the amphitheatre wings
-      // without directly intersecting the hero ring band
+      // Smooth continuous depth fading — ZERO sudden popping or disappearing rings
       if (depthFactor < 0.58) {
-        const corridorLimit = isMobile ? 0.9 : 1.2
-        if (Math.abs(x) < corridorLimit) {
+        const corridorLimit = isMobile ? 0.75 : 0.95
+        const edgeFade = THREE.MathUtils.smoothstep(Math.abs(x), corridorLimit * 0.35, corridorLimit + 0.55)
+        op *= edgeFade
+        if (op <= 0.01) {
           isVisible = false
           op = 0.0
-        } else {
-          // On the rear wings: push outward to clear the central sightline
-          const lateralDir = sinVal >= 0 ? 1 : -1
-          x = corridorLimit * lateralDir + (x - corridorLimit * lateralDir) * 0.45
-
-          // Smooth luxury fade as it approaches or leaves the central corridor
-          const edgeFade = THREE.MathUtils.smoothstep(Math.abs(x), corridorLimit, corridorLimit + 0.5)
-          op *= edgeFade
-          if (op <= 0.02) {
-            isVisible = false
-            op = 0.0
-          }
         }
       }
 
-      // During arrival phase (progress < 0.14), non-hero rings are 100% hidden
-      if (progress < 0.14 && i !== 0) {
+      // During arrival phase (progress < 0.12), non-hero rings are hidden
+      if (progress < 0.12 && i !== 0) {
         isVisible = false
         op = 0.0
       }
 
-      // In exit phase (progress > 0.96): dissolve rings softly into darkness for seamless transition into Atelier
+      // In exit phase (progress > 0.96): dissolve non-hero rings, while keeping hero ring gracefully softly visible
+      // into Atelier so there is never an awkward pitch-black empty void
       if (exitFactor > 0.001) {
-        op = THREE.MathUtils.lerp(op, 0.0, exitFactor)
-        if (op < 0.02) {
+        if (i !== closestIdx) {
+          op = THREE.MathUtils.lerp(op, 0.0, exitFactor * 1.5)
+        } else {
+          op = THREE.MathUtils.lerp(op, 0.45, exitFactor)
+        }
+        if (op < 0.01) {
           isVisible = false
           op = 0.0
         }
@@ -387,12 +368,13 @@ function SpatialJewelleryUniverse({
     // Lateral drift opposite to rotation, subtle elevation, and damped dolly
     const camX = -0.12 * Math.sin(theta) + state.pointer.x * 0.08
     const camY = THREE.MathUtils.lerp(0.24, 0.34, choiceFactor) + state.pointer.y * 0.06
+    const baseCamZ = isMobile ? 3.85 : 3.05
     const camZ =
       progress < 0.18
-        ? THREE.MathUtils.lerp(4.0, 3.3, progress / 0.18)
+        ? THREE.MathUtils.lerp(isMobile ? 4.35 : 3.7, baseCamZ, progress / 0.18)
         : progress > 0.90 && progress <= 0.96
-        ? THREE.MathUtils.lerp(3.3, 3.5, choiceFactor)
-        : 3.3
+        ? THREE.MathUtils.lerp(baseCamZ, isMobile ? 4.05 : 3.25, choiceFactor)
+        : baseCamZ
 
     targetCamPos.current.set(camX, camY, camZ)
     dampVector3(currentCamPos.current, targetCamPos.current, CINEMATIC_MASS.heavy, dt)
@@ -433,7 +415,7 @@ function SpatialJewelleryUniverse({
       />
       {/* Warm ground bounce fill */}
       <directionalLight position={[-4, -3, 3]} intensity={0.8} color="#f0e6d6" />
-      <Environment preset="studio" environmentIntensity={1.35} />
+      <StudioEnvironment intensity={1.35} />
 
       {/* ALL 4 REAL 3D RINGS RENDERED SIMULTANEOUSLY IN PHYSICAL SPACE */}
       {METALS.map((metal, i) => (
@@ -452,7 +434,10 @@ function SpatialJewelleryUniverse({
   )
 }
 
-export default function MaterialRingScene({ progress, onMetalChange }: MaterialRingSceneProps) {
+export default function MaterialRingScene({
+  progress,
+  onMetalChange,
+}: MaterialRingSceneProps) {
   const dragOffsetRef = useRef(0)
   const isDragging = useRef(false)
   const startX = useRef(0)
@@ -477,15 +462,6 @@ export default function MaterialRingScene({ progress, onMetalChange }: MaterialR
   const handlePointerUp = () => {
     if (!isDragging.current) return
     isDragging.current = false
-    // Magnetic snap to nearest 90-degree quadrant on release
-    const nearest = Math.round(dragOffsetRef.current / (Math.PI / 2)) * (Math.PI / 2)
-    dragOffsetRef.current = nearest
-    // Give smooth damping time to settle before reverting to scroll mode
-    setTimeout(() => {
-      if (!isDragging.current) {
-        interactionModeRef.current = 'scroll'
-      }
-    }, 450)
   }
 
   return (
@@ -496,7 +472,7 @@ export default function MaterialRingScene({ progress, onMetalChange }: MaterialR
         height: '100%',
         position: 'absolute',
         inset: 0,
-        touchAction: 'none',
+        touchAction: 'pan-y',
         cursor: 'grab',
         zIndex: 1,
       }}
@@ -507,6 +483,8 @@ export default function MaterialRingScene({ progress, onMetalChange }: MaterialR
     >
       <Canvas
         camera={{ position: [0, 0.28, 4.2], fov: 40, near: 0.1, far: 50 }}
+        dpr={typeof window !== 'undefined' && window.innerWidth < 768 ? [1, 1.25] : [1, 1.5]}
+        frameloop="always"
         gl={{
           antialias: true,
           powerPreference: 'high-performance',
